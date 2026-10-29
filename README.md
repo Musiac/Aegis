@@ -9,26 +9,24 @@
 who dared look upon it was turned instantly to stone. This Aegis works the same way: does not wait for an attack, it finds the vulnerability before hand, turns it to stone — fixes it in place — and proves the fix holds, before anything hostile
 ever gets through.*
 
-An AI security agent, powered entirely by Meta's Muse Spark Model, that scans your own source code and
-container images, actively pentests a target you point it at, and writes and
-applies fixes, then re-scans to prove the fix actually worked. It is relentless and will keep doing the scan -> fix - rescan cycle until scan shows 0 issues left. Built for the Meta Global
-Hackathon (dev.meta.ai/events/global-hackathon), it runs four cyber-security skills -- `redteam`,
-`fixredteam`, `pentest`, `fixpentest`. Aegis is also frugal. When working on public repos, it automatically
-calls Muse Spark's cheaper, contributor model (where Meta may use the
-content to train its models) and for private repos or fixing its own code, it uses non-contributor model (where Meta doesn't use the
-content to train its models).
+Think of Aegis as a guard dog that also happens to be a locksmith: it scans your code and container
+images, actively tests the locks on a target you point it at, picks the ones it finds weak, fixes them
+itself, then checks the door again to be sure it's really locked now. It doesn't stop at a report — it
+keeps looping scan → fix → re-scan until the scan comes back clean. It's powered entirely by Meta's Muse
+Spark Model and runs four skills: `redteam`, `fixredteam`, `pentest`, `fixpentest`. Built for the
+[Meta Global Hackathon](https://dev.meta.ai/events/global-hackathon).
 
-We'll say it plainly: we're **Musiacs** — Muse maniacs — at IdeaNirvana. Building Aegis for this
-hackathon hasn't felt like adapting to someone else's platform; it's felt like finally having the right
-engine for a problem we've been working on for a while. We're genuinely excited to be building on Muse Spark models,
-and we think it shows.
+Aegis is also careful with money: on public repos it uses Muse Spark's cheaper contributor tier (where
+Meta may use the content to train its models); on private repos or its own code, it switches itself to
+the standard, non-contributor tier (content never used for training) — like checking your ticket before
+deciding which seat you get.
 
-This isn't the first time Muse has touched our work, either. Before this hackathon existed, we asked
-Muse(Meta's personal AI agent - not Muse Model) — to look at our own live AI product,
-[Jiina](https://ideanirvana.com/solutions/jiina), the way an outside visitor would. On **12 October
-2026**, Muse ran two passive checks (headers, certificates, redirects, sign-in behavior) against
-`ideanirvana.com`, `ideanirvana.ai` and `solutions.ideanirvana.com`. We gave Muse a valid loginID to login to our Jiina AI and it found nothing critical but still surfaced six real findings, and we fixed every
-one the same day:
+We're **Musiacs** — Muse maniacs — at IdeaNirvana, and that's not a line, it's where the repo's name
+comes from (`Musiac/Aegis`). Before this hackathon even existed, we asked Meta's **Muse** (their personal
+AI agent, not the Muse model) to look at our own live product, [Jiina](https://ideanirvana.com/solutions/jiina),
+the way a stranger off the street would. On **12 October 2026**, logged in with a real test account, Muse
+ran two passive checks against `ideanirvana.com`, `ideanirvana.ai` and `solutions.ideanirvana.com`.
+Nothing critical turned up, but six real findings did — and we fixed every one the same day:
 
 | Severity | Finding | Fixed |
 |---|---|---|
@@ -39,30 +37,28 @@ one the same day:
 | Low | HSTS didn't cover subdomains | ✅ same day |
 | Info | No `security.txt` contact file | ✅ published |
 
-Muse turned us into "Musiacs" - and hence our new github Repo name Musiac/Aegis. That's the reason we decided to participate in this hackathon and build the new Shield Agent, Aegis, on Muse. As part of testing Aegis, it already found
-and helped us close real security gaps in our live personal agent, Jiina. Full
-detail, scanner list and every other security result for Jiina is public at
+That's the moment that turned us into Musiacs, and the reason we built Aegis on Muse for this hackathon.
+Full detail and every other Jiina security result is public at
 [ideanirvana.com/solutions/jiina](https://ideanirvana.com/solutions/jiina).
 
 ## How Aegis relates to Jiina, and what was built this week
 
-IdeaNirvana LLC (EIN-registered US company) is an existing startup; this hackathon submission is entered
-in the Startup track by its sole founder/developer. IdeaNirvana's existing live product,
-[Jiina](https://ideanirvana.com/solutions/jiina), is a multi-agentic AI assistant with a different set of
-capabilities and skills (document editing, SAP/ServiceNow/Jira workflows, reporting, and more) — Jiina's
-code and git history are **not** part of this repository and stay closed-source.
+IdeaNirvana LLC is an existing startup; this hackathon entry is submitted in the Startup track by its
+sole founder/developer. Our existing live product, [Jiina](https://ideanirvana.com/solutions/jiina), is
+a multi-agentic assistant with its own unrelated skills (document editing, SAP/ServiceNow/Jira
+workflows, reporting). **Jiina's code and git history are not part of this repository** and stay
+closed-source.
 
-**Aegis is a new, separate, single-agent project**, in this new repository
-([`Musiac/Aegis`](https://github.com/Musiac/Aegis), created **27 October 2026**), built specifically for
-this hackathon. It shares no code history with Jiina in this public repo. What's new in Aegis's capabilities: the whole security-agent persona and
-skill set (`redteam`/`fixredteam`/`pentest`/`fixpentest`), the sandboxed clone/scan/fix/re-verify pipeline
-described below, the live OWASP ZAP active-pentest integration, Meta Muse Spark as the driving model with
-the public/private contributor-tier billing safety mechanism (see Benchmarks below), push-to-talk voice
-(Meta's own ASR, `muse-voice-transcribe-1.0`) and the browser-based spoken replies, and the structural
-fix-completion guard in `core.py` that stops the agent from ending a fix job half-done (see the Run log).
-The one deliberate overlap with Jiina: the 12 October 2026 passive-security findings against Jiina's own
-live site, described just below, predate this hackathon and are included here only as evidence of why we
-trust Muse enough to build Aegis on it — not as part of the submission's own work.
+**Aegis is a new, separate, single-agent project**, in its own repository
+([`Musiac/Aegis`](https://github.com/Musiac/Aegis), created **27 October 2026**) built specifically for
+this hackathon, sharing no code history with Jiina. Everything here is new for this hackathon: the whole
+security-agent persona and skill set (`redteam`/`fixredteam`/`pentest`/`fixpentest`), the sandboxed
+clone → scan → fix → re-verify pipeline, the live OWASP ZAP active-pentest integration, Muse Spark as
+the driving model with the public/private billing safety switch (see Benchmarks), push-to-talk voice
+(Meta's own ASR, `muse-voice-transcribe-1.0`), and the structural guard in `core.py` that won't let the
+agent call a fix job done when it isn't (see the Run log). The one deliberate overlap with Jiina is the
+12 October 2026 passive-security story above — it predates this hackathon and is here only to show why
+we trust Muse enough to build Aegis on it, not as part of the submission's own work.
 
 ## What it does
 
@@ -78,9 +74,9 @@ you point it at (`run redteam on github repo: <url>`) — see "Status" below for
 
 ## Benchmarks: why we chose Muse
 
-Two real, timed runs, each a full clone → static scan (gitleaks/Bandit/Semgrep/pip-audit/npm-audit) →
-live OWASP ZAP active pentest → fix → re-verify cycle, both scanners genuinely exercised end to end —
-not a synthetic benchmark, the actual tool doing actual work.
+We put Muse Spark in a drag race against our own self-hosted model — same repo, same job, same
+tool-calling loop: clone → static scan (gitleaks/Bandit/Semgrep/pip-audit/npm-audit) → live OWASP ZAP
+active pentest → fix → re-verify. No synthetic benchmark, just the real tool doing real work, timed.
 
 | Target | Type | Model / tier | Wall time | Cost |
 |---|---|---|---|---|
@@ -88,9 +84,8 @@ not a synthetic benchmark, the actual tool doing actual work.
 | same repo, earlier run | Public repo | local qwen3.8-27b-sglang | 27m 19s (1639.1s) | $0.00 |
 | This repo (private) | Private repo | Muse Spark, **Standard** (non-contributor) tier | 7m 23s (442.9s) | $2.39 |
 
-**Muse Spark was ~32% faster than our own self-hosted qwen3.8-27b on an identical job** (same repo, same
-task, same tool-calling loop) — 18m38s vs 27m19s wall-clock. It meaningfully outran the local
-qwen model running on our local gpu.
+**Muse Spark won by ~32%** — 18m38s vs 27m19s on an identical job. The sports car beat the home-grown
+hatchback running on our own GPU.
 
 ## Meta models vs. OS/browser features
 
@@ -134,20 +129,19 @@ the report), computed by `backend/model_pricing.py` from actual token usage.
 
 ## Why this exists
 
-Static pattern-matchers (Semgrep, Bandit) and semantic pentesters (like
-[Strix](https://github.com/usestrix/strix)) catch different bug classes. This project's own source has
-been the test subject: a 3rd-party pentest (Strix) found 4 real bugs our static scanners never would
-have (cross-account sandbox access, a DNS-rebinding SSRF, a SQL validator bypass, stale WebSocket
-sessions) — each one fixed, then verified closed by a fresh Strix run against the fixed code. The full
-before/after writeups are not in this repo yet, but the reverse comparison is:
+A pattern-matcher like Semgrep or Bandit reads your code; a semantic pentester like
+[Strix](https://github.com/usestrix/strix) actually runs it and tries to break in — two different
+skill sets, two different bug classes. We used our own source as the guinea pig: Strix found 4 real bugs
+our static scanners never would have (cross-account sandbox access, a DNS-rebinding SSRF, a SQL
+validator bypass, stale WebSocket sessions), we fixed every one, and a fresh Strix run confirmed they
+stayed fixed. The reverse comparison is public too:
 [Aegis scanning and fixing Strix's own source, 3 independent runs, each reaching 0 findings across
 all 5 static scanners in one pass](docs/strix_full_fix_verification_2026-10-26.md).
 
 ## Install
 
-Prerequisit:
-Needs Docker and a bash shell (Linux, macOS, or WSL2 on Windows) with `rsync` and `python3`. The
-containers use `--network host`, so on Docker Desktop host networking must be enabled.
+**You'll need:** Docker, a bash shell (Linux, macOS, or WSL2 on Windows), plus `rsync` and `python3`.
+The containers use `--network host`, so on Docker Desktop, host networking must be enabled.
 
 ```
 git clone https://github.com/Musiac/Aegis
@@ -179,18 +173,14 @@ network namespace with `redteam/` or `pentestlive/`, which need to reach the int
 
 **LightMA™: our own lightweight, auditable agentic framework**
 
-LightMA™ is the internal framework IdeaNirvana AI built for straightforward, reliable tool-calling
-agents: a simple, auditable round loop that scans, reasons and calls real tools, with structural guards
-built in to catch a job that stalls or reports itself done before it actually is. It is a lightweight
-multi-agentic framework by design.
+Before writing a line of Aegis, we looked at the usual suspects — LangChain, LangGraph, Microsoft Agent
+Framework, Google ADK, Strands — and wanted something a single person could read top to bottom and
+trust, for an agent doing real, consequential work like writing code fixes and running live attacks. So
+we built our own: a simple round loop that scans, reasons, and calls real tools, with structural guards
+built in so the loop can't quietly call itself "done" when it isn't.
 
-Before building it we looked at the frameworks in common use — LangChain, LangGraph, Microsoft Agent
-Framework, Google ADK and Strands — but wanted something simple enough to read and reason about end to
-end, for a single-operator agent doing real, consequential work (writing code fixes, running active
-security scans). So we developed our own: LightMA™.
-
-Aegis is our single-agent on LightMA™, capable of running real security scans, writing real fixes, and
-generating real reports in a single conversation. Since then we have been adding skills to it.
+Aegis is our first agent on LightMA™ — one agent, real scans, real fixes, real reports, all in a single
+conversation. We've been adding skills to it ever since.
 
 ## Architecture
 
@@ -233,11 +223,13 @@ Three small containers + a thin backend:
 
 ## Sandbox security: live-tested, not theorized (2026-10-27)
 
-Pointing an AI agent at an arbitrary, untrusted public repo and letting it clone, run, and actively
-pentest that repo's own server is a real attack surface — the cloned code itself could be malicious.
-Rather than just asserting the sandbox is safe, we ran six real attacks directly against the live
-`aegis-sandbox` container (the exact container `fixredteam`/`fixpentest` use to apply fixes), invoked through the same `bash_run`/`export_project` code paths the
-agent itself uses:
+Pointing an AI agent at a stranger's public repo and letting it clone, run, and actively pentest that
+repo's own server is itself a real attack surface — the cloned code could be malicious. So instead of
+just asserting the sandbox is safe, we tried to break out of it ourselves. Think of the sandbox as a
+padded room with the Wi-Fi cable cut: no doors to the host, no socket to phone home on, nothing sharp
+within reach. We ran six real attacks directly against the live `aegis-sandbox` container (the exact
+one `fixredteam`/`fixpentest` use to apply fixes), through the same `bash_run`/`export_project` code
+paths the agent itself uses:
 
 | # | Attack | Result |
 |---|---|---|
