@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aegis</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Aegis</h1>
+  <label for="provider">model</label>
+  <select id="provider"></select>
+  <button type="button" id="voice-toggle" class="voice-toggle" aria-pressed="false" title="Voice: click to turn on spoken replies + microphone">Voice: OFF</button>
+  <span id="voice-tts-label" class="voice-tts-label" hidden></span>
+  <span id="voice-asr-label" class="voice-tts-label" hidden></span>
+  <span id="total-cost" class="total-cost" title="Running grand total of this session's real cost (LLM + ASR + TTS)">Grand Total Cost: $0.000</span>
+  <span id="status" class="status">connecting...</span>
+</header>
+<div id="warning-banner" class="warning-banner" hidden></div>
+<main>
+  <section id="terminal-pane" aria-label="live terminal">
+    <div class="pane-label-row">
+      <div class="pane-label">terminal</div>
+      <button type="button" id="download-terminal" title="Download everything shown here as a plain text file">Download</button>
+    </div>
+    <div id="terminal" class="pane-body"></div>
+  </section>
+  <section id="chat-pane" aria-label="chat">
+    <div class="pane-label">chat</div>
+    <div id="chat" class="pane-body"></div>
+    <form id="composer">
+      <button type="button" id="mic-btn" disabled title="Click to talk, click again to stop" aria-label="Click to talk">&#127908;</button>
+      <input id="input" type="text" autocomplete="off" placeholder='e.g. "scan self and fix any issue you find"' />
+      <button type="submit" id="send">Send</button>
+      <span id="task-dots" class="task-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+    </form>
+  </section>
+</main>
+<footer id="examples" aria-label="example questions">
+  <div id="example-list" class="example-list"></div>
+  <button type="button" id="example-nav" class="example-nav" title="More example questions (7-12)" aria-label="More example questions">&rarr;</button>
+</footer>
+<script src="/static/markdown.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

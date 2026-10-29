@@ -1,0 +1,124 @@
+# Custom Semgrep rules, added 2026-10-21 after a Strix pentest found three real issues our own gitleaks/bandit/
+# semgrep(registry)/pip-audit/npm-audit scans never caught (each needed cross-function or domain-specific
+# reasoning a generic registry rule pack doesn't encode). These are narrow, heuristic rules aimed at catching
+# the SAME real bug shapes again -- they will have false positives on unrelated code; that is expected and
+# acceptable for a WARNING-severity heuristic meant to prompt a human/AI review, not a definitive finding.
+rules:
+  - id: route-param-user-id-passed-unchecked
+    languages: [python]
+    severity: WARNING
+    message: >
+      A route handler parameter whose name suggests another user's identifier (user_id, account_id, owner_id) is
+      passed directly into a function call. If this reads or modifies that user's data, verify the CALLER'S OWN
+      session identity is checked against it first -- otherwise this is an IDOR (CWE-639). Real example found
+      2026-10-21: GET /api/user-memory took user_id from the query string and returned that user's stored
+      conversation history to ANY logged-in caller, with no ownership check at all.
+    patterns:
+      - pattern-either:
+          - pattern: $RESULT = $CALL($ID, ...)
+          - pattern: $RESULT = $CALL(..., $ID, ...)
+          - pattern: return $CALL($ID, ...)
+          - pattern: return $CALL(..., $ID, ...)
+      - metavariable-regex:
+          metavariable: $ID
+          regex: "^(user_id|account_id|owner_id)(\\.strip\\(\\))?$"
+      # Excluded when the SAME function also raises an HTTPException somewhere -- a cheap heuristic (not real
+      # control-flow analysis) for "an access-control check already exists in this handler", which is what keeps
+      # this rule from permanently flagging the fixed version of the exact bug it exists to catch.
+      - pattern-not-inside: |
+          async def $OUTER(...):
+              ...
+              raise HTTPException(...)
+              ...
+      - pattern-not-inside: |
+          def $OUTER(...):
+              ...
+              raise HTTPException(...)
+              ...
+
+  - id: unescaped-fstring-into-html-email
+    languages: [python]
+    severity: WARNING
+    message: >
+      A variable is interpolated directly into an HTML string (f-string) without escaping. If this value can be
+      attacker-controlled (e.g. a username supplied at signup) and the string is sent as an email body or rendered
+      as HTML, this is HTML/content injection (CWE-79) -- escape with html.escape() or markupsafe.escape() before
+      interpolating. Real example found 2026-10-21: the signup confirmation email interpolated the unvalidated
+      `username` straight into an HTML `<p>Hi {username},</p>` line, letting an unauthenticated signup deliver
+      phishing markup to any email address under the platform's own verified sender.
+    # Excludes a variable whose own name signals it was already escaped (e.g. username_safe) -- a cheap heuristic,
+    # not real taint tracking, but it is what keeps this rule from permanently flagging the fixed version of the
+    # exact bug it exists to catch (escape with html.escape()/markupsafe.escape() into a `..._safe` name).
+    pattern-regex: 'f"<[a-zA-Z][^"]*\{(?!html\.escape)[a-zA-Z_][a-zA-Z0-9_.]*(?<!_safe)(?<!_escaped)\}[^"]*"'
+    # Scoped to the actual email-sending code (the one file that imports `resend`) rather than every f-string that
+    # happens to build HTML anywhere in the codebase -- live-document/webinar HTML building (voice_livedoc.py,
+    # voice_webinar_tools.py) already runs its own content through html.escape() under short variable names (`t`,
+    # etc.) this rule's naming heuristic can't recognize, and is a different risk context (same user's own
+    # content, never emailed to anyone) from the real bug class this rule exists to catch.
+    paths:
+      include:
+        - "*/routes/route_auth.py"
+
+  - id: redirect-follow-without-revalidation
+    languages: [python]
+    severity: WARNING
+    message: >
+      A redirect Location header is followed by reconstructing the next URL, but the new host/scheme is not
+      re-validated against an allowlist or public-address check before the next request -- this can enable SSRF to
+      internal addresses (CWE-918), especially if the "own host" check allows wildcard subdomain matching of a
+      shared-DNS domain (e.g. sslip.io, nip.io) where the ATTACKER controls what the subdomain resolves to. Real
+      example found 2026-10-21: browser/scan.py followed up to 4 redirects without re-checking host_is_own() or
+      resolve_public() on each hop, and creds.py's OWN_HOSTS wildcard-matched every *.sslip.io subdomain -- sslip.io
+      resolves any subdomain to the IP literally encoded in it, so an attacker-chosen host passed the allowlist.
+    patterns:
+      - pattern: $URL = str($HTTPX.URL($URL).join($R.headers["location"]))
+
+  - id: dockerfile-php2shell-unpatched
+    languages: [dockerfile]
+    severity: ERROR
+    message: >
+      This Dockerfile installs a PHP version left exposed to PHP2Shell (CVE-2026-109618 / CVE-2026-109619),
+      a pair of critical (CVSS 9.2) unauthenticated-RCE flaws in the PHP engine itself, patched upstream on
+      2026-10-21 at 8.2.35 / 8.3.36 / 8.4.27 / 8.5.12. Added as a deterministic rule, 2026-10-27, because
+      public vulnerability-DB-based scanners (Trivy's OS-advisory matching) had NOT yet ingested this CVE
+      pair at the time this rule was written -- confirmed empirically against php8.1 (Ubuntu 22.04) and
+      php8.3 (Ubuntu 24.04) with a freshly-downloaded Trivy DB, both returning zero HIGH/CRITICAL hits for a
+      genuinely unpatched install. PHP 8.1 and earlier never received an official fix at all and are
+      PERMANENTLY vulnerable -- the fix is to move off that line entirely (there is no patched 8.1 build to
+      upgrade to), e.g. onto a supported, patched 8.2+/8.3+/8.4+/8.5+ line.
+    # Anchored to the RUN instruction's own AST node (not pattern-regex, which matches raw file text including
+    # comments -- confirmed as a real false positive when this Dockerfile's own explanatory comment mentioned
+    # "php8.1" historically and got flagged). `...` only spans tokens inside one RUN's shell command; each
+    # literal below is the exact apt/apk package name for an unfixed PHP line (5.x/6.x/7.x/8.0/8.1).
+    patterns:
+      - pattern-either:
+          - pattern: RUN ... php5 ...
+          - pattern: RUN ... php5-cli ...
+          - pattern: RUN ... php5-fpm ...
+          - pattern: RUN ... php5.6 ...
+          - pattern: RUN ... php5.6-cli ...
+          - pattern: RUN ... php5.6-fpm ...
+          - pattern: RUN ... php7.0 ...
+          - pattern: RUN ... php7.0-cli ...
+          - pattern: RUN ... php7.0-fpm ...
+          - pattern: RUN ... php7.1 ...
+          - pattern: RUN ... php7.1-cli ...
+          - pattern: RUN ... php7.1-fpm ...
+          - pattern: RUN ... php7.2 ...
+          - pattern: RUN ... php7.2-cli ...
+          - pattern: RUN ... php7.2-fpm ...
+          - pattern: RUN ... php7.3 ...
+          - pattern: RUN ... php7.3-cli ...
+          - pattern: RUN ... php7.3-fpm ...
+          - pattern: RUN ... php7.4 ...
+          - pattern: RUN ... php7.4-cli ...
+          - pattern: RUN ... php7.4-fpm ...
+          - pattern: RUN ... php8.0 ...
+          - pattern: RUN ... php8.0-cli ...
+          - pattern: RUN ... php8.0-fpm ...
+          - pattern: RUN ... php8.1 ...
+          - pattern: RUN ... php8.1-cli ...
+          - pattern: RUN ... php8.1-fpm ...
+          - pattern: RUN ... libapache2-mod-php8.1 ...
+          - pattern: RUN ... libapache2-mod-php8.0 ...
+          - pattern: RUN ... libapache2-mod-php7.4 ...

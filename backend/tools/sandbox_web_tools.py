@@ -1,0 +1,92 @@
+"""sandbox_app_start / sandbox_app_restart / sandbox_app_stop / sandbox_app_status -- control the REAL server of a cloned-and-fixed project so an
+active ZAP pentest has something genuinely running to attack. Added 2026-10-26 (see sandbox_web/control.py's own docstring for the full design and
+why "start the cloned code's server and pentest it" was not actually possible before this).
+
+Talks over plain HTTP to aegis-sandbox-web's control plane (sandbox_web/control.py), reachable on aegis-net by container name. That
+container also answers to the alias www.sandbox.com on port 8900 -- the address pentest_zap's target_url should name once the app is running.
+"""
+import json
+
+import httpx
+
+CONTROL_URL = "http://aegis-sandbox-web:7999"
+APP_HOST = "www.sandbox.com"
+APP_PORT = 8900
+
+
+async def _call(path: str, body: dict = None) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(35.0, connect=5.0)) as c:
+            r = (await c.post(f"{CONTROL_URL}{path}", json=body or {})) if body is not None else (await c.get(f"{CONTROL_URL}{path}"))
+        return r.json()
+    except httpx.HTTPError as e:
+        return {"ok": False, "error": f"could not reach the sandbox-web control plane ({type(e).__name__}): is the aegis-sandbox-web "
+                                       f"container running? See sandbox_web/README.md for the docker run command."}
+
+
+def _note(d: dict, verb: str) -> dict:
+    if d.get("ok") and "project" in d:
+        d["note"] = (f"The app is now reachable INSIDE the sandbox network at http://{APP_HOST}:{APP_PORT}/ -- use that exact address as "
+                      f"pentest_zap's target_url. {verb} succeeded; report it plainly, including any 'error' field here even when ok is true "
+                      f"(e.g. it started but is not answering yet).")
+    return d
+
+
+def _mark_running(ctx: dict, project: str, ok: bool) -> None:
+    """Tracked so a Word report's own code (doc_tools._deliver) can guarantee the sandboxed app is stopped once the report is real, even if
+    the model never calls sandbox_app_stop itself -- a real run (2026-10-26, Strix) stopped the app on its own initiative right after the last
+    re-pentest, BEFORE export_project/create_word_document, instead of after the report as asked; wording alone did not reliably hold that
+    ordering, so it is enforced here structurally instead."""
+    if ok:
+        ctx["sandbox_app_running"], ctx["sandbox_app_project"] = True, project
+    ctx.pop("sandbox_app_turn", None)
+
+
+async def sandbox_app_start(args: dict, ctx: dict) -> str:
+    """Starts the REAL web server of a cloned (and possibly already-fixed) project, so pentest_zap has a live target at
+    http://www.sandbox.com:8900/. project: the clone's name (from redteam_clone_repo/redteam_clone_private_repo's result), or "self". Stops
+    whatever app was already running first -- only one runs at a time. Only works for a project shaped like Aegis's own convention
+    (backend/web.py, `uvicorn backend.web:app`) unless you pass cmd with an explicit start command for that project instead."""
+    project = str(args.get("project") or "").strip()
+    if not project:
+        return json.dumps({"ok": False, "error": "Say which project to start (the clone's name, or \"self\")."})
+    result = _note(await _call("/start", {"project": project, "cmd": str(args.get("cmd") or "")}), "start")
+    _mark_running(ctx, project, bool(result.get("ok")))
+    return json.dumps(result)
+
+
+async def sandbox_app_restart(args: dict, ctx: dict) -> str:
+    """Restarts the sandboxed app from the project's CURRENT working copy -- call this after writing a fix, right before re-running pentest_zap,
+    so the re-scan is against the fixed code, not the one still in memory from before the edit. Same arguments as sandbox_app_start."""
+    project = str(args.get("project") or "").strip()
+    if not project:
+        return json.dumps({"ok": False, "error": "Say which project to restart (the clone's name, or \"self\")."})
+    result = _note(await _call("/restart", {"project": project, "cmd": str(args.get("cmd") or "")}), "restart")
+    _mark_running(ctx, project, bool(result.get("ok")))
+    return json.dumps(result)
+
+
+async def sandbox_app_stop(args: dict, ctx: dict) -> str:
+    """Stops the sandboxed app. You do NOT need to remember to call this before the Word report: create_word_document stops it automatically,
+    in code, the moment the report is actually created, whether or not you call this yourself. Call it directly only if you want it stopped
+    sooner than that (e.g. the operator asked you not to fix anything after all)."""
+    ctx["sandbox_app_running"] = False
+    return json.dumps(await _call("/stop", {}))     # {} (not None) so _call POSTs -- control.py only serves /stop under POST
+
+
+async def ensure_stopped_after_report(ctx: dict) -> str:
+    """Called by doc_tools._deliver right after a Word document is actually sent -- the one guaranteed stop point, independent of whether (or
+    when) the model itself called sandbox_app_stop this turn. Returns a short note for the report's own 'what I made' block, or "" if there
+    was nothing to stop."""
+    if not ctx.get("sandbox_app_running"):
+        return ""
+    project = ctx.get("sandbox_app_project") or ""
+    ctx["sandbox_app_running"] = False
+    result = await _call("/stop", {})
+    return (f"The temporary sandbox server ({project}, http://{APP_HOST}:{APP_PORT}/) has been stopped."
+            if result.get("ok") else f"Tried to stop the temporary sandbox server ({project}) but it answered: {result.get('error', result)}")
+
+
+async def sandbox_app_status(args: dict, ctx: dict) -> str:
+    """Whether a sandboxed app is running right now, which project, and its recent output -- check this if a start/restart looked uncertain."""
+    return json.dumps(await _call("/status"))

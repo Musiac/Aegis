@@ -1,0 +1,11 @@
+.env
+src/
+self_target/
+aegis_out/
+dynamic_pristine/
+dynamic_target/
+images/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
