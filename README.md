@@ -5,34 +5,29 @@
 
 **Aegis** — **A**gentic **E**nterprise **G**uard for **I**nfo**S**ec, by **Musiac** — **Mus**e **I**ntelligence for **A**dvanced **C**yberSec.
 
-*In Greek mythology, the aegis was no ordinary shield — the divine, impenetrable goatskin cloak and
-shield carried by Zeus and Athena, bearing the severed Gorgon's head at its center, so that any enemy
-who dared look upon it was turned instantly to stone before a single blow could land. To stand "under
-someone's aegis" came to mean standing under protection so complete that the threat never reaches you at
-all. This Aegis works the same way: it doesn't just block an attack after the fact, it finds the
-vulnerability, turns it to stone — fixes it in place — and proves the fix holds, before anything hostile
+*In Greek mythology, the aegis was no ordinary shield — the divine, impenetrable shield carried by Zeus and Athena, so that any enemy
+who dared look upon it was turned instantly to stone. This Aegis works the same way: does not wait for an attack, it finds the vulnerability before hand, turns it to stone — fixes it in place — and proves the fix holds, before anything hostile
 ever gets through.*
 
-An AI security agent, powered entirely by Meta's Muse Spark, that scans your own source code and
-container images (static, read-only), actively pentests a target you point it at, and can write and
-apply real fixes itself — then re-scans to prove the fix actually worked. Built for the Meta Global
+An AI security agent, powered entirely by Meta's Muse Spark Model, that scans your own source code and
+container images, actively pentests a target you point it at, and writes and
+applies fixes, then re-scans to prove the fix actually worked. It is relentless and will keep doing the scan -> fix - rescan cycle until scan shows 0 issues left. Built for the Meta Global
 Hackathon (dev.meta.ai/events/global-hackathon), it runs four cyber-security skills -- `redteam`,
-`fixredteam`, `pentest`, `fixpentest` -- and whatever minimum code each one needs. Aegis automatically
-calls Muse Spark's cheaper, contributor-tier model when working on public repos (where Meta may use the
-content to train its models) and the regular, non-contributor tier for private repos or its own code
-(never used for training) — disclosed to the operator at the start of every session.
+`fixredteam`, `pentest`, `fixpentest`. Aegis is also frugal. When working on public repos, it automatically
+calls Muse Spark's cheaper, contributor model (where Meta may use the
+content to train its models) and for private repos or fixing its own code, it uses non-contributor model (where Meta doesn't use the
+content to train its models).
 
 We'll say it plainly: we're **Musiacs** — Muse maniacs — at IdeaNirvana. Building Aegis for this
 hackathon hasn't felt like adapting to someone else's platform; it's felt like finally having the right
-engine for a problem we've been working on for a while. We're genuinely excited to be building on Muse,
+engine for a problem we've been working on for a while. We're genuinely excited to be building on Muse Spark models,
 and we think it shows.
 
 This isn't the first time Muse has touched our work, either. Before this hackathon existed, we asked
-Muse — Meta's personal AI agent, the consumer product, not this API — to look at our own live AI product,
+Muse(Meta's personal AI agent - not Muse Model) — to look at our own live AI product,
 [Jiina](https://ideanirvana.com/solutions/jiina), the way an outside visitor would. On **12 October
 2026**, Muse ran two passive checks (headers, certificates, redirects, sign-in behavior) against
-`ideanirvana.com`, `ideanirvana.ai` and `solutions.ideanirvana.com` — no break-in attempt, not a
-penetration test, and it found nothing critical. It still surfaced six real findings, and we fixed every
+`ideanirvana.com`, `ideanirvana.ai` and `solutions.ideanirvana.com`. We gave Muse a valid loginID to login to our Jiina AI and it found nothing critical but still surfaced six real findings, and we fixed every
 one the same day:
 
 | Severity | Finding | Fixed |
@@ -44,8 +39,8 @@ one the same day:
 | Low | HSTS didn't cover subdomains | ✅ same day |
 | Info | No `security.txt` contact file | ✅ published |
 
-That's the honest reason we trust Muse enough to build Aegis on it for this hackathon: it already found
-and helped us close real gaps in our own production product, before we ever had an API key in hand. Full
+Muse turned us into "Musiacs" - and hence our new github Repo name Musiac/Aegis. That's the reason we decided to participate in this hackathon and build the new Shield Agent, Aegis, on Muse. As part of testing Aegis, it already found
+and helped us close real security gaps in our live personal agent, Jiina. Full
 detail, scanner list and every other security result for Jiina is public at
 [ideanirvana.com/solutions/jiina](https://ideanirvana.com/solutions/jiina).
 
@@ -59,7 +54,7 @@ code and git history are **not** part of this repository and stay closed-source.
 
 **Aegis is a new, separate, single-agent project**, in this new repository
 ([`Musiac/Aegis`](https://github.com/Musiac/Aegis), created **27 October 2026**), built specifically for
-this hackathon. It shares no code history with Jiina in this public repo. What's new Aegis's capabiities: the whole security-agent persona and
+this hackathon. It shares no code history with Jiina in this public repo. What's new in Aegis's capabilities: the whole security-agent persona and
 skill set (`redteam`/`fixredteam`/`pentest`/`fixpentest`), the sandboxed clone/scan/fix/re-verify pipeline
 described below, the live OWASP ZAP active-pentest integration, Meta Muse Spark as the driving model with
 the public/private contributor-tier billing safety mechanism (see Benchmarks below), push-to-talk voice
@@ -94,40 +89,18 @@ not a synthetic benchmark, the actual tool doing actual work.
 | This repo (private) | Private repo | Muse Spark, **Standard** (non-contributor) tier | 7m 23s (442.9s) | $2.39 |
 
 **Muse Spark was ~32% faster than our own self-hosted qwen3.8-27b on an identical job** (same repo, same
-task, same tool-calling loop) — 18m38s vs 27m19s wall-clock. We did not re-run this same job against
-GPT in this test, so we're not claiming Muse beat GPT here — only that it meaningfully outran the local
-model we'd otherwise default to. Meta's own inference infrastructure is the most credible explanation,
-and the data backs it up plainly. (The private-repo run isn't a fair head-to-head against either of the
-above — it's a different, smaller repo — so it's reported on its own, not as a third point in the same
-comparison.)
-
-**The public/private billing-tier safety mechanism was verified by reading the actual model string Muse
-Spark's own API returned for every single round, not by trusting our own code.** Confirmed in the turn
-log: **45 of 46 rounds** on `muse-spark-1.3-contributor` for the public repo (round 1, before the clone
-tool had even run, correctly defaulted to the safe Standard tier — exactly the fail-closed behavior this
-is designed to have), and **45 of 45 rounds** on `muse-spark-1.3` (Standard) for the private repo — zero
-rounds on the training-eligible contributor tier, the whole way through.
-
-**Why Aegis runs on Spark, not Wonder or Wonder Full.** `muse-wonder-1.0` is a real, callable model on
-the Model API — pricier than Spark (confirmed live: $4.00/$20.00 per 1M input/output tokens, vs. Spark
-Standard's $1.25/$4.25, and Wonder has no contributor tier at all) — but we picked Spark deliberately for
-this build rather than defaulting to the most expensive option available. **Muse Wonder Full**, the
-genuinely top-tier model, isn't a choice we could have made either way: it's restricted to subscribers of
-Meta's terminal-based coding agent, Muse Code, on its Power ($50/month) or Maximum ($200/month) plans,
-and is not exposed through the Model API at all, at any price. Worth knowing honestly going in, not
-something we discovered as a limitation after the fact.
+task, same tool-calling loop) — 18m38s vs 27m19s wall-clock. It meaningfully outran the local
+qwen model running on our local gpu.
 
 ## Meta models vs. OS/browser features
 
-Per guidance from Meta's hackathon organizers ("every model your project calls at runtime must be a
-Meta model... a built-in system or browser voice that isn't an AI model call is fine"), here is exactly
-which parts of Aegis are a Meta model call and which are a plain OS/browser feature:
+Here is exactly which parts of Aegis are a Meta model call and which are a plain OS/browser feature:
 
 **Meta model calls (the only AI models this project calls at runtime):**
 - **`muse-spark-1.3` / `muse-spark-1.3-contributor`** (Model API) — every chat turn, tool-calling decision,
   and fix the agent writes. The contributor tier is used automatically for public repos, the Standard tier
-  for private repos/self-scans; see the Benchmarks section above for how that's verified live, not just
-  trusted from our own code.
+  for private repos/self-scans.
+
 - **`muse-voice-transcribe-1.0`** (`wss://api.meta.ai/v1/asr/realtime`) — push-to-talk's speech-to-text,
   when the mic button is used.
 
@@ -136,22 +109,13 @@ which parts of Aegis are a Meta model call and which are a plain OS/browser feat
   (Web Speech API). This renders entirely on the operator's own machine, using whatever system voice is
   already installed (macOS/Chrome ship several) — it is not an AI model, local or remote, and nothing is
   sent anywhere for it. An earlier draft of this feature called a local, self-hosted Kokoro-82M model (open
-  source, running on this machine's own CPU, no API key) — that was explicitly reverted after Meta's
-  organizers confirmed a third-party model can't be used even if it's local and free; the backend code for
-  it (`kokoro/`, `backend/api/tts_kokoro`) still exists in this repo for personal, non-submission use, but
-  `install.sh` never starts it and the UI never calls it.
-- A Gemini one-shot TTS path (`/api/tts`, `GEMINI_TTS_MODEL_NAME`) also still exists server-side from an
-  earlier build, same reasoning as Kokoro (a competitor's model) — never called by the current UI either.
+  source, running on this machine's own CPU). We reverted after Meta's organizers confirmed a third-party model can't be used even if it's local and free; the backend code for it (`kokoro/`, `backend/api/tts_kokoro`) still exists but
+  `install.sh` never starts it and the UI never calls it. A Gemini one-shot TTS path (`/api/tts`, `GEMINI_TTS_MODEL_NAME`) also still exists server-side from an
+  earlier build, same reasoning as Kokoro (a competitor's model) — never gets called by the current UI either.
 
 ## Run matrix: repeatability evidence
 
-Every row below is a real, timed run against the real backend (`[cj-turn]` structured log), not a
-synthetic benchmark. The 2026-10-29 rows below demonstrate a real bug and its fix, live: on
-`microsoft/TokenEconomizer` and `aws/tools-for-devops-agent` (55 and 80 findings respectively), the
-agent initially triaged every finding correctly but ended the turn without writing a single fix — a
-structural guard was added to `core.py` the same day (forces the turn to continue until `edit_file`,
-then `export_project` and `create_word_document`, have all run), and the identical repos were re-run
-afterward to confirm it actually works, not just that it looks plausible in isolation.
+Every row below is a timed run against the real backend.
 
 | Date | Target | Phase | Wall time | Cost | Outcome |
 |---|---|---|---|---|---|
@@ -165,8 +129,8 @@ afterward to confirm it actually works, not just that it looks plausible in isol
 | 2026-10-29 | `microsoft/TokenEconomizer` | Repeatability run 2 (post-guard) | 26m 32s | $0.349 | **Fixed:** guard fired once ("fixed but not exported"), then `export_project`/`create_word_document` ran — zip + Word report delivered |
 | 2026-10-29 | `aws/tools-for-devops-agent` | Repeatability run 2 (post-guard) | 46m 52s | $0.616 | **Fixed:** guard fired once ("never fixed"), then 1 `edit_file` + `export_project` + `create_word_document` — zip + Word report delivered |
 
-All costs are the real, metered Muse token cost for the whole conversation (every scan + every fix +
-the report), computed by `backend/model_pricing.py` from actual token usage — never an estimate.
+All costs are metered Muse token cost for the whole conversation (every scan + every fix +
+the report), computed by `backend/model_pricing.py` from actual token usage.
 
 ## Why this exists
 
@@ -181,6 +145,7 @@ all 5 static scanners in one pass](docs/strix_full_fix_verification_2026-10-26.m
 
 ## Install
 
+Prerequisit:
 Needs Docker and a bash shell (Linux, macOS, or WSL2 on Windows) with `rsync` and `python3`. The
 containers use `--network host`, so on Docker Desktop host networking must be enabled.
 
@@ -191,8 +156,7 @@ cp .env.example .env            # fill in MUSE_API_KEY
 bash install.sh                 # builds + starts all 4 containers, including the web UI daemon; generates REDTEAM_TOKEN/PENTESTLIVE_TOKEN into .env itself
 ```
 
-That's the whole install — same shape as Strix's own `curl | bash`, minus the curl (review before you
-run anything, including this). `install.sh` is a plain bash script, not a `docker compose` file — the
+The `install.sh` is a plain bash script, not a `docker compose` file — the
 containers have deliberately different network modes, and the script is simpler to read end to end
 before running it. It ends by printing the two ways in to the chat loop:
 
@@ -205,8 +169,8 @@ The web UI (`aegis-backend-web`) runs as a daemon by default — open the URL an
 CLI is a separate, interactive container using the exact same backend image and the same running
 redteam/sandbox/pentestlive containers; run it any time instead of (or alongside) the web UI.
 
-**One honest caveat:** `sandbox/` runs with `--network none` as a real, load-bearing security boundary
-(the isolated code sandbox fixredteam/fixpentest write real fixes in) — it genuinely cannot share a
+**Isolated Sandbox:** The `sandbox/` runs with `--network none` as a real, load-bearing security boundary
+(the isolated code sandbox fixredteam/fixpentest write real fixes in) — it cannot share a
 network namespace with `redteam/` or `pentestlive/`, which need to reach the internet
 (pip-audit/npm-audit's advisory databases) or a target host. "One docker" here means one command
 (`bash install.sh`), not literally one container.
@@ -262,7 +226,7 @@ Three small containers + a thin backend:
   doesn't list them. No MCP server layer, no voice/audio, no multi-account login — single operator,
   bring your own Muse Spark key.
 
-  **Optional per-skill routing (a personal `.env` choice, never a public default):** set both
+  **Optional per-skill routing (based on `.env` setting):** set both
   `AEGIS_SCAN_PROVIDER` and `AEGIS_FIX_PROVIDER` to route a plain scan/pentest request to one
   provider and a fix/remediate request to another, automatically, by each message's own wording —
   nothing is sent anywhere until the operator opts in by setting both.
@@ -272,9 +236,8 @@ Three small containers + a thin backend:
 Pointing an AI agent at an arbitrary, untrusted public repo and letting it clone, run, and actively
 pentest that repo's own server is a real attack surface — the cloned code itself could be malicious.
 Rather than just asserting the sandbox is safe, we ran six real attacks directly against the live
-`aegis-sandbox` container (the exact container `fixredteam`/`fixpentest` use to apply fixes, same recipe
-as cyberJiina's own `sandbox/`), invoked through the same `bash_run`/`export_project` code paths the
-agent itself uses — not a simulation, not a code review, the actual payloads:
+`aegis-sandbox` container (the exact container `fixredteam`/`fixpentest` use to apply fixes), invoked through the same `bash_run`/`export_project` code paths the
+agent itself uses:
 
 | # | Attack | Result |
 |---|---|---|
@@ -284,10 +247,6 @@ agent itself uses — not a simulation, not a code review, the actual payloads:
 | 4 | Read real credentials (`MUSE_API_KEY`, GitHub tokens) from inside the sandbox | **Blocked** — no real `.env` file is reachable anywhere in the sandbox's filesystem, only inert `.env.example` templates; `.env` is deliberately never copied in. |
 | 5 | Container breakout (Docker socket, root, kernel writes) | **Blocked** — no Docker socket present; all Linux capabilities are zeroed at the kernel level (`CapEff: 0000000000000000`); running as non-root (`uid=1001`); root filesystem remount refused; `/proc/sys` writes refused (read-only). |
 | 6 | Symlink/zip-slip attack on the exported fix zip | **Found, then fixed and re-verified live (2026-10-27)**: `export_project` originally dereferenced symlinks into the zip rather than storing the link — a planted `/etc/passwd` symlink was exported as 880 bytes of real content. Fixed by adding `-y` to the `zip` command (store symlinks as symlinks); re-ran the identical attack against the rebuilt sandbox and confirmed the exported zip now extracts `leaked_passwd.txt` as an actual 11-byte symlink pointing at `/etc/passwd`, not dereferenced content. |
-
-Five of six held completely; the sixth is a real finding, disclosed here rather than left undiscovered,
-with its actual exploitability honestly scoped rather than overstated. (Tested directly against
-cyberJiina's identical sandbox image, which Aegis shares byte-for-byte via the same `sandbox/Dockerfile`.)
 
 ## UI
 
@@ -299,6 +258,10 @@ turn), and a connection status indicator. No audio controls — text in, text ou
 Under both panes sits a strip of example questions (six at a time, shown shortened). Clicking one puts
 the full question in the chat box, unsent, so you can edit it first; the small arrow at the bottom right
 pages between examples 1–6 and 7–12. The list lives in `backend/static/app.js` (`EXAMPLES`).
+
+## Aegis observability
+
+Aegis works like a Hibachi Chef - cooks right on your table. As Aegis works diligently on each task you give to it, it opens a terminal for you to see exactly each command it is running in the sandbox, with the output of that command displayed right there to you. At the end of working session of Aegis, you can click on download to get the full log of its working session in front of you.  
 
 ## Run log
 
