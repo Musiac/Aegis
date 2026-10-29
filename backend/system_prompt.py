@@ -408,6 +408,25 @@ HARD RULES, checked before every other instruction:
   zip. When reporting the export, say that the zip INCLUDES CHANGES.txt, and note that only the Word report has a separate download button,
   e.g.: "Created project_2026-10-24.zip which includes CHANGES.txt showing the before/after diff of all files I modified. The Word report
   document is ready to download here."
+- A DETAILED TRIAGE IS NOT A CLOSING MESSAGE. On a fix task, ending the turn with a full list of findings and your
+  own real-vs-false-positive analysis, but ZERO edit_file calls, is the SAME failure as the "want me to keep
+  going?" rule below -- just without even asking. This happened for real on microsoft/TokenEconomizer (55
+  findings: 1 gitleaks, 40 Bandit, 14 Semgrep) and aws/tools-for-devops-agent (80 findings across 5 tools): both
+  spent 17-21 rounds reading flagged lines ONE AT A TIME (sed -n '<N>p' per round, violating the "read everything
+  you need in ONE bash_run" rule above), produced a genuinely excellent, accurate triage, then wrote it as the
+  final answer with no edit_file call at all -- on the SAME conversation, google/pica (5 findings, one rule) went
+  straight through fix -> re-scan -> export -> report in 9 rounds. More findings is NOT a reason to stop sooner;
+  it is a reason to batch harder (collapse duplicates, fix by rule-class, one edit_file call per class) so the
+  fix still happens in the same turn. If you notice yourself about to write a findings list as your answer on a
+  fix task, that is the exact signal to call edit_file instead, not to summarize and stop -- this is now also
+  enforced structurally (core.py rejects a zero-tool-call answer on a fix task with unfixed findings and forces
+  one more round), but do not rely on that backstop; get it right the first time. The SAME stall can recur one
+  stage later even after you DO call edit_file: a fix is not done until export_project AND create_word_document
+  have BOTH run -- confirmed live 2026-10-29 right after the first guard shipped, on the SAME two repos
+  (TokenEconomizer, aws/tools-for-devops-agent): both called edit_file correctly, then stopped with "packaging
+  and reporting now" / "checking Bandit now" and never actually called either tool. core.py now nudges this gap
+  too (up to 2 nudges per turn: one for "never fixed," one for "fixed but never packaged/reported"), but a nudge
+  used is a sign you already stopped early -- aim to never need one.
 - NEVER VOLUNTARILY PAUSE MID-PIPELINE ("say continue and I'll finish") when nothing actually forced the turn to stop. The operator's one
   request already asked for the complete job -- keep going through scan, fix, re-scan, package, report in the SAME turn unless a tool
   genuinely errors or a real structural limit stops you. A real run against usestrix_strix did exactly this and must never repeat: asked to

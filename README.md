@@ -49,6 +49,26 @@ and helped us close real gaps in our own production product, before we ever had 
 detail, scanner list and every other security result for Jiina is public at
 [ideanirvana.com/solutions/jiina](https://ideanirvana.com/solutions/jiina).
 
+## How Aegis relates to Jiina, and what was built this week
+
+IdeaNirvana LLC (EIN-registered US company) is an existing startup; this hackathon submission is entered
+in the Startup track by its sole founder/developer. IdeaNirvana's existing live product,
+[Jiina](https://ideanirvana.com/solutions/jiina), is a multi-agentic AI assistant with a different set of
+capabilities and skills (document editing, SAP/ServiceNow/Jira workflows, reporting, and more) — Jiina's
+code and git history are **not** part of this repository and stay closed-source.
+
+**Aegis is a new, separate, single-agent project**, in this new repository
+([`Musiac/Aegis`](https://github.com/Musiac/Aegis), created **27 October 2026**), built specifically for
+this hackathon. It shares no code history with Jiina in this public repo. What's new Aegis's capabiities: the whole security-agent persona and
+skill set (`redteam`/`fixredteam`/`pentest`/`fixpentest`), the sandboxed clone/scan/fix/re-verify pipeline
+described below, the live OWASP ZAP active-pentest integration, Meta Muse Spark as the driving model with
+the public/private contributor-tier billing safety mechanism (see Benchmarks below), push-to-talk voice
+(Meta's own ASR, `muse-voice-transcribe-1.0`) and the browser-based spoken replies, and the structural
+fix-completion guard in `core.py` that stops the agent from ending a fix job half-done (see the Run log).
+The one deliberate overlap with Jiina: the 12 October 2026 passive-security findings against Jiina's own
+live site, described just below, predate this hackathon and are included here only as evidence of why we
+trust Muse enough to build Aegis on it — not as part of the submission's own work.
+
 ## What it does
 
 | Command | What happens |
@@ -97,6 +117,32 @@ Meta's terminal-based coding agent, Muse Code, on its Power ($50/month) or Maxim
 and is not exposed through the Model API at all, at any price. Worth knowing honestly going in, not
 something we discovered as a limitation after the fact.
 
+## Meta models vs. OS/browser features
+
+Per guidance from Meta's hackathon organizers ("every model your project calls at runtime must be a
+Meta model... a built-in system or browser voice that isn't an AI model call is fine"), here is exactly
+which parts of Aegis are a Meta model call and which are a plain OS/browser feature:
+
+**Meta model calls (the only AI models this project calls at runtime):**
+- **`muse-spark-1.3` / `muse-spark-1.3-contributor`** (Model API) — every chat turn, tool-calling decision,
+  and fix the agent writes. The contributor tier is used automatically for public repos, the Standard tier
+  for private repos/self-scans; see the Benchmarks section above for how that's verified live, not just
+  trusted from our own code.
+- **`muse-voice-transcribe-1.0`** (`wss://api.meta.ai/v1/asr/realtime`) — push-to-talk's speech-to-text,
+  when the mic button is used.
+
+**OS/browser features (no model call, no third-party API, no network request to any AI provider):**
+- **Spoken replies (Voice toggle's "TTS: browser")** — the browser's own built-in `window.speechSynthesis`
+  (Web Speech API). This renders entirely on the operator's own machine, using whatever system voice is
+  already installed (macOS/Chrome ship several) — it is not an AI model, local or remote, and nothing is
+  sent anywhere for it. An earlier draft of this feature called a local, self-hosted Kokoro-82M model (open
+  source, running on this machine's own CPU, no API key) — that was explicitly reverted after Meta's
+  organizers confirmed a third-party model can't be used even if it's local and free; the backend code for
+  it (`kokoro/`, `backend/api/tts_kokoro`) still exists in this repo for personal, non-submission use, but
+  `install.sh` never starts it and the UI never calls it.
+- A Gemini one-shot TTS path (`/api/tts`, `GEMINI_TTS_MODEL_NAME`) also still exists server-side from an
+  earlier build, same reasoning as Kokoro (a competitor's model) — never called by the current UI either.
+
 ## Why this exists
 
 Static pattern-matchers (Semgrep, Bandit) and semantic pentesters (like
@@ -141,6 +187,8 @@ network namespace with `redteam/` or `pentestlive/`, which need to reach the int
 (`bash install.sh`), not literally one container.
 
 ## Architecture
+
+![Aegis architecture: browser → aegis-backend-web → aegis-redteam/pentestlive/sandbox-proxy, with the code-fix sandbox isolated behind --network none, Meta's Model API and GitHub as the only external services, and host-mounted volumes for scan targets and exported fixes](docs/assets/aegis_architecture.png)
 
 Three small containers + a thin backend:
 

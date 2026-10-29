@@ -98,6 +98,13 @@ docker rm -f aegis-pentestlive >/dev/null 2>&1 || true
 docker run -d --name aegis-pentestlive --network aegis-net -p 127.0.0.1:7907:7907 --read-only --tmpfs /tmp:size=256m --restart unless-stopped \
   -e PENTESTLIVE_TOKEN="$PENTESTLIVE_TOKEN" aegis-pentestlive:latest >/dev/null
 
+# NOTE on kokoro/: a local Kokoro-82M TTS container (kokoro/Dockerfile, backend's /api/tts_kokoro) was built
+# 2026-10-29, then NOT wired in here the same day -- Meta's hackathon organizers ruled it out ("Every model
+# your project calls at runtime must be a Meta model... a built-in system or browser voice that isn't an AI
+# model call is fine"). The code stays in the repo for personal, non-submission use only; this script never
+# builds or starts aegis-kokoro-tts, and the frontend never calls /api/tts_kokoro. See README's "Meta models
+# vs. OS/browser features" section.
+
 # --- backend: image already built above, for Trivy. The web UI runs as a real daemon (:8900); the CLI stays interactive. ---
 # AEGIS_REDTEAM_URL/AEGIS_PENTESTLIVE_URL point at the other containers by NAME (aegis-net's own DNS), not
 # 127.0.0.1 -- each container has its own network namespace on a bridge network, unlike --network host.

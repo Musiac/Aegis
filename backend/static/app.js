@@ -13,6 +13,7 @@
   const voiceToggle = document.getElementById("voice-toggle");
   const voiceTtsLabel = document.getElementById("voice-tts-label");
   const voiceAsrLabel = document.getElementById("voice-asr-label");
+  const muteSpeakerToggle = document.getElementById("mute-speaker-toggle");
   const warningBanner = document.getElementById("warning-banner");
 
   let ws = null;
@@ -21,6 +22,21 @@
                          // passed to /ws/asr so its real per-call cost lands in THIS session's total (TTS is browser-side, no cost)
   let museConfigured = false;   // MUSE_API_KEY actually set on the host -- gates both Send and the mic (ASR is Muse too)
   let voiceOn = false;          // Voice toggle state -- gates TTS + mic together (mic starts OFF until this is ON)
+  // Mute Speaker: browser TTS plays out of the Mac's real speakers, and the mic (also real hardware, no echo
+  // cancellation between the two) picks that audio right back up and corrupts the ASR transcript -- Gemini TTS
+  // never had this problem (narrower/quieter voice, different timing), browser TTS does. Mute before recording,
+  // unmute after -- speakOne() below checks this flag and skips playback entirely while muted (never queues it for
+  // later; a muted message is simply not spoken).
+  let speakerMuted = false;
+  // TTS backend for the Voice toggle's spoken replies: always "browser" (the OS/browser's own Web Speech API --
+  // not an AI model call at all). A local-Kokoro path was built 2026-10-29 then explicitly reverted/disabled the
+  // same day after Meta's hackathon organizers ruled it out: "Every model your project calls at runtime must be
+  // a Meta model, so a third-party TTS model like Kokoro-82M can't be used even if it runs locally on your own
+  // CPU... a built-in system or browser voice that isn't an AI model call is fine." The backend endpoint and
+  // container still exist (kokoro/, /api/tts_kokoro) for personal non-submission use, but nothing in this file
+  // calls them, and install.sh no longer starts the container by default -- see README's "Meta models vs.
+  // OS/browser features" section.
+  const ttsBackend = "browser";
 
   function showWarning(text, isError) {
     warningBanner.textContent = text;
@@ -71,8 +87,10 @@
       voiceToggle.setAttribute("aria-pressed", "false");
       voiceTtsLabel.hidden = true;
       voiceAsrLabel.hidden = true;
+      muteSpeakerToggle.hidden = true;
       if (recording) stopRecording();
       window.speechSynthesis.cancel();
+      stopKokoroAudio();
       speechQueue.length = 0;   // stop any in-progress catch-up replay; does not resume where it left off next time -- see below
       updateMicEnabled();
       return;
@@ -83,10 +101,11 @@
       voiceOn = true;
       voiceToggle.textContent = "Voice: ON";
       voiceToggle.setAttribute("aria-pressed", "true");
-      voiceTtsLabel.textContent = "TTS: browser";
+      voiceTtsLabel.textContent = "TTS: browser (OS/browser voice, not a model call)";
       voiceTtsLabel.hidden = false;
       voiceAsrLabel.textContent = "ASR: muse";
       voiceAsrLabel.hidden = false;
+      muteSpeakerToggle.hidden = false;
       updateMicEnabled();
       // Replay ONLY the first MANDATORY_REPLAY_COUNT assistant messages (the billing disclosure + the scanner-check
       // announcement) every time Voice is turned on, no matter how late -- never the rest of whatever's already on
@@ -100,6 +119,15 @@
     } finally {
       voiceToggle.disabled = false;
     }
+  });
+
+  // Mute before switching the mic on, unmute after switching it off and before submitting the transcribed text --
+  // cancels anything mid-playback immediately so a muted recording never catches the tail end of a sentence.
+  muteSpeakerToggle.addEventListener("click", () => {
+    speakerMuted = !speakerMuted;
+    muteSpeakerToggle.textContent = speakerMuted ? "Speaker: MUTED" : "Speaker: ON";
+    muteSpeakerToggle.setAttribute("aria-pressed", String(speakerMuted));
+    if (speakerMuted) { window.speechSynthesis.cancel(); stopKokoroAudio(); }
   });
 
   // Classifies each line the same way main Jiina's own terminal view distinguishes a tool call from its result
@@ -362,19 +390,49 @@
   const speechQueue = [];
   let speaking = false;
 
+  // Chrome/Safari bug, confirmed here 2026-10-28: speechSynthesis silently stops firing onend on a long
+  // utterance (the first real sentence, the account-notice greeting, was long enough to trigger it every time)
+  // and the queue hangs forever waiting on an event that will never come. Splitting into short, sentence-sized
+  // utterances sidesteps the bug almost entirely (it's a long-utterance issue), and each short chunk gets its own
+  // SHORT bounded timeout, so even a genuine hang on one chunk costs a couple seconds, not minutes.
+  function splitIntoSpeechChunks(text) {
+    const sentences = text.match(/[^.!?]+[.!?]+(\s+|$)|[^.!?]+$/g) || [text];
+    return sentences.map((s) => s.trim()).filter(Boolean);
+  }
+
+  function speakChunk(chunk) {
+    return new Promise((resolve) => {
+      const utter = new SpeechSynthesisUtterance(chunk);
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(stuckTimer);
+        resolve();
+      };
+      utter.onend = finish;
+      utter.onerror = finish;
+      const stuckTimer = setTimeout(finish, Math.max(4000, chunk.length * 110));
+      window.speechSynthesis.speak(utter);
+    });
+  }
+
+  // No-op kept only so the voiceToggle/muteSpeakerToggle handlers above don't need their own edits -- there is
+  // no non-browser audio element to stop anymore (reverted 2026-10-29, see ttsBackend's own comment above).
+  function stopKokoroAudio() {}
+
   async function speakOne(text) {
     const clean = (text || "").trim();
     if (!clean) return;
+    if (speakerMuted) return;   // Mute Speaker is ON -- drop this message, never queue it for after unmute
     if (!("speechSynthesis" in window)) {
       addTerminalLine("[tts] browser speech synthesis not available");
       return;
     }
-    await new Promise((resolve) => {
-      const utter = new SpeechSynthesisUtterance(clean);
-      utter.onend = resolve;
-      utter.onerror = resolve;
-      window.speechSynthesis.speak(utter);
-    });
+    for (const chunk of splitIntoSpeechChunks(clean)) {
+      if (speakerMuted) return;   // muted mid-message -- stop immediately, don't speak the remaining chunks
+      await speakChunk(chunk);
+    }
   }
 
   async function processSpeechQueue() {

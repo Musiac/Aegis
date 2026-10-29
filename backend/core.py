@@ -172,6 +172,18 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
     cost0 = ctx["session_cost_usd"]
     tool_counts, seen_calls, repeats, tool_errors, rounds = Counter(), Counter(), 0, 0, 0
     end_reason = "max_rounds"
+    # Structural guard against a real, repeated failure (sagemaker-python-sdk, microsoft/TokenEconomizer,
+    # aws/tools-for-devops-agent, 2026-10-28/29): on a fix task with many findings, the model sometimes spends many
+    # rounds triaging (reading flagged lines one at a time) then ends the turn with a detailed triage summary as
+    # its final answer -- zero edit_file calls, despite being asked to fix. A prompt-only rule already exists for
+    # the sibling bug (ending with "want me to keep going?") but this version ends with NO question at all, so it
+    # slips past that wording. Tracked per-turn (reset here, not session-wide like ctx["scan_done"]) so a nudge
+    # is only considered for THIS turn's own findings/fixes, never carried over from an earlier turn.
+    turn_findings_total = 0
+    turn_edit_calls = 0
+    turn_export_ok = False
+    fix_nudge_count = 0
+    FIX_NUDGE_MAX = 2   # one for "never fixed anything", one for "fixed but never exported/reported" -- bounded, not unlimited
 
 
     def _task_cost() -> float:
@@ -229,6 +241,37 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
                 await filler.stop()
                 await on_text(text)
             if not calls:
+                doc_made_this_turn = ctx.get("doc_made_turn") == ctx.get("turn_no")
+                deliverable_gap = None
+                if is_task and ctx.get("fix_task") and turn_findings_total > 0 and fix_nudge_count < FIX_NUDGE_MAX:
+                    if turn_edit_calls == 0:
+                        deliverable_gap = (
+                            f"You have not called edit_file yet, but {turn_findings_total} real finding(s) were found "
+                            "this turn and a fix was asked for. Triage is not a fix -- the operator asked for 0 findings "
+                            "left, not an assessment. Call edit_file now with the real fixes for these findings, batched "
+                            "by finding class, then re-scan, export, and report, same as every other fix job. Do not end "
+                            "this turn with any finding still unfixed."
+                        )
+                    elif not turn_export_ok or not doc_made_this_turn:
+                        # Real gap, found live 2026-10-29 right after the edit_file guard above shipped: on
+                        # microsoft/TokenEconomizer and aws/tools-for-devops-agent, the model DID call edit_file
+                        # (the first guard worked) but then stopped before export_project/create_word_document --
+                        # same silent-stop pattern, one stage later. "fixed but never packaged/reported" is just
+                        # as incomplete as "never fixed," so it gets the same structural nudge.
+                        missing = [n for n, done in (("export_project", turn_export_ok), ("create_word_document", doc_made_this_turn)) if not done]
+                        deliverable_gap = (
+                            f"You called edit_file this turn but never finished the job -- {' and '.join(missing)} "
+                            "still has not run. A fix job is not done until the fixed code is exported AND the Word "
+                            "report is created, same as every other fix job. Call whichever of these is still "
+                            "missing now, in this same turn -- do not end with the job half-delivered."
+                        )
+                if deliverable_gap:
+                    fix_nudge_count += 1
+                    turnlog.log("fix_nudge", sid=sid, turn=turn_id, findings=turn_findings_total, round=rounds,
+                                nudge_n=fix_nudge_count, edit_calls=turn_edit_calls, export_ok=turn_export_ok, doc_done=doc_made_this_turn)
+                    messages.append({"role": "assistant", "content": text, "tool_calls": []})
+                    messages.append({"role": "user", "content": deliverable_gap})
+                    continue
                 end_reason = "answered"
                 return
             messages.append({"role": "assistant", "content": text, "tool_calls": calls})
@@ -278,6 +321,17 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
                         ctx["repo_visibility"] = "private"
                 if tc["name"] in _SCAN_TOOLS:
                     ctx["scan_done"] = True
+                    try:
+                        turn_findings_total += json.loads(result).get("count") or 0
+                    except (ValueError, TypeError, AttributeError):
+                        pass
+                elif tc["name"] == "edit_file":
+                    turn_edit_calls += 1
+                elif tc["name"] == "export_project":
+                    try:
+                        turn_export_ok = turn_export_ok or bool(json.loads(result).get("ok"))
+                    except (ValueError, TypeError, AttributeError):
+                        pass
                 elif tc["name"] == "create_word_document" and '"created": true' in result:
                     ctx["doc_done"] = True
                     ctx["doc_made_turn"] = ctx.get("turn_no")

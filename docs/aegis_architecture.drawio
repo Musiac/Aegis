@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-10-29T12:00:00.000Z" agent="Aegis" version="24.0.0" type="device">
+  <diagram name="Aegis Architecture" id="aegis-arch">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ===================== Operator / Browser ===================== -->
+        <mxCell id="operator" value="Operator (browser)&#10;Mac, Chrome/Safari" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== External: Meta Model API ===================== -->
+        <mxCell id="muse" value="Meta Model API (external)&#10;muse-spark-1.3 / -contributor&#10;muse-voice-transcribe-1.0" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="160" width="220" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="github" value="GitHub (external)&#10;public / private repo clone" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="260" width="220" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== aegis-net bridge network boundary ===================== -->
+        <mxCell id="net_boundary" value="aegis-net (Docker bridge network)" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=none;strokeColor=#82b366;dashed=1;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="40" width="820" height="520" as="geometry" />
+        </mxCell>
+
+        <!-- aegis-backend-web -->
+        <mxCell id="backend" value="aegis-backend-web  :8900&#10;FastAPI (web.py, core.py)&#10;run_turn() tool-dispatch loop&#10;fix-nudge structural guard" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="380" y="80" width="260" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- aegis-redteam -->
+        <mxCell id="redteam" value="aegis-redteam  :7906&#10;gitleaks · Bandit · Semgrep&#10;pip-audit · npm-audit · Trivy&#10;OWASP ZAP (spider+passive+active)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="700" y="80" width="260" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- aegis-pentestlive -->
+        <mxCell id="pentestlive" value="aegis-pentestlive  :7907&#10;pd-httpx: ONE liveness probe&#10;for a real 3rd-party URL&#10;(never a vuln scan)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="380" y="460" width="260" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- aegis-sandbox-web -->
+        <mxCell id="sandboxweb" value="aegis-sandbox-web&#10;serves a cloned project's OWN&#10;server at www.sandbox.com:8900&#10;(for active ZAP pentest only)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="700" y="460" width="260" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- aegis-sandbox-proxy -->
+        <mxCell id="sandboxproxy" value="aegis-sandbox-proxy&#10;relays aegis-sock&#10;(unix socket, Docker named volume)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="380" y="280" width="260" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== sandbox network-isolation boundary ===================== -->
+        <mxCell id="sandbox_boundary" value="aegis-sandbox  --network none  (no network device at all)" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="700" y="280" width="260" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="sandbox" value="bash_run / edit_file / repl_run&#10;writes real fixes here&#10;/self_target, /dynamic_target&#10;cap-drop ALL, 4g mem, 256 pids" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="715" y="320" width="230" height="75" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== Host bind mounts / volumes ===================== -->
+        <mxCell id="vol_boundary" value="Host bind mounts (survive container recreate)" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=none;strokeColor=#666666;dashed=1;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="380" y="600" width="580" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="vol_targets" value="dynamic_pristine/ · dynamic_target/&#10;self_target/ · src/self/" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="400" y="635" width="260" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="vol_out" value="aegis_out/&#10;exported fixed-code zips&#10;(CHANGES.txt diff inside)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="700" y="635" width="240" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== Edges ===================== -->
+        <mxCell id="e1" value="WebSocket /ws, /ws/asr" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;" edge="1" parent="1" source="operator" target="backend">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="chat completions (muse-spark-1.3)&#10;ASR (muse-voice-transcribe-1.0)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;dashed=1;" edge="1" parent="1" source="backend" target="muse">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="redteam_clone_repo /&#10;redteam_clone_private_repo" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;dashed=1;" edge="1" parent="1" source="redteam" target="github">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="scanner / ZAP tool calls&#10;(HTTP, over aegis-net)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;" edge="1" parent="1" source="backend" target="redteam">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="pentestlive_consent /&#10;pentestlive_scan" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;" edge="1" parent="1" source="backend" target="pentestlive">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="bash_run / edit_file / repl_run&#10;over aegis-sock (unix socket)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;" edge="1" parent="1" source="backend" target="sandboxproxy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="sandboxproxy" target="sandbox">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="sandbox_app_start/restart&#10;serves the fix" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;" edge="1" parent="1" source="sandbox" target="sandboxweb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" value="ZAP active pentest&#10;http://www.sandbox.com:8900" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;" edge="1" parent="1" source="redteam" target="sandboxweb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="read/write fixes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;" edge="1" parent="1" source="sandbox" target="vol_targets">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" value="export_project" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;" edge="1" parent="1" source="sandbox" target="vol_out">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" value="read-only scan target" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;dashed=1;" edge="1" parent="1" source="redteam" target="vol_targets">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- legend -->
+        <mxCell id="legend" value="Legend&#10;Green = Docker container on aegis-net&#10;Red dashed = --network none (sandbox code-fix boundary)&#10;Orange = external service (Meta API / GitHub)&#10;Grey = host bind-mounted volume" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;align=left;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="420" width="260" height="120" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

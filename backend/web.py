@@ -183,6 +183,51 @@ async def gemini_ping():
         return {"ok": False, "configured": True, "error": f"{type(e).__name__}: {e}"}
 
 
+@app.get("/api/kokoro_ping")
+async def kokoro_ping():
+    """Confirms the local Kokoro-82M container (aegis-kokoro-tts, started by install.sh) is up and its model has
+    loaded -- so the UI's TTS-backend picker can warn before the operator switches to it mid-demo. Unlike
+    muse_ping/gemini_ping this needs no API key: Kokoro is local and free, AEGIS_KOKORO_URL is the only
+    prerequisite (set by install.sh; absent only if this build predates the Kokoro container)."""
+    base = os.environ.get("AEGIS_KOKORO_URL", "")
+    if not base:
+        return {"ok": False, "configured": False, "error": "AEGIS_KOKORO_URL is not set -- rerun install.sh to add the aegis-kokoro-tts container"}
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as c:
+            r = await c.get(f"{base}/health")
+        if r.status_code == 200:
+            return {"ok": True, "configured": True}
+        return {"ok": False, "configured": True, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
+    except Exception as e:                                                       # noqa: BLE001
+        return {"ok": False, "configured": True, "error": f"{type(e).__name__}: {e}"}
+
+
+@app.post("/api/tts_kokoro")
+async def tts_kokoro(request: Request):
+    """Voice toggle's local-TTS path: proxies text to the aegis-kokoro-tts container's OpenAI-shaped
+    /v1/audio/speech (see kokoro/server.py) and relays the WAV bytes back as-is. Added 2026-10-29 as an
+    open-source alternative to the browser's Web Speech API and to Gemini TTS -- no API key, no per-call cost,
+    runs entirely on this machine (CPU is fine for a single-operator demo; see kokoro/Dockerfile's own note on
+    measured latency). Body: {"text": "...", "sid": "..."} -- sid is accepted for symmetry with /api/tts but
+    costs nothing, so no _*_cost_by_sid entry is ever written for it."""
+    body = await request.json()
+    text = clean_for_speech(str(body.get("text") or ""))
+    if not text:
+        return Response(status_code=400, content=b"no text")
+    base = os.environ.get("AEGIS_KOKORO_URL", "")
+    if not base:
+        return Response(status_code=503, content=b"Local TTS is not configured: AEGIS_KOKORO_URL is not set (rerun install.sh)")
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as c:
+            r = await c.post(f"{base}/v1/audio/speech", json={"input": text, "response_format": "wav"})
+    except Exception as e:                                                       # noqa: BLE001 -- the container may still be downloading the model on first boot
+        print(f"[tts/kokoro] raised {type(e).__name__}: {e}", flush=True)
+        return Response(status_code=502, content=f"{type(e).__name__}: {e}".encode())
+    if r.status_code != 200:
+        return Response(status_code=502, content=r.content[:600] or b"Kokoro TTS returned an error")
+    return Response(status_code=200, content=r.content, media_type="audio/wav")
+
+
 @app.post("/api/tts")
 async def tts(request: Request):
     """Voice toggle ON's spoken reply: a one-shot gemini-3.8-flash-lite-tts call (text in, audio out). Switched
@@ -191,9 +236,9 @@ async def tts(request: Request):
     cheaper: $0.50/1M text input + $6.00/1M audio output, vs Live's $3.00/1M + $12.00/1M audio rates). Pattern and
     the one hard gotcha both verified against Jiina's own route_speech.py._gemini_synthesize_sync: this model
     rejects system_instruction outright and has no instruction-following separation at all -- it is a literal
-    speak-whatever-is-in-contents engine, so `contents` must be ONLY the raw text, never a wrapper/instruction. No
-    Kokoro path exists in Aegis at all (the operator's own instruction, 2026-10-27) -- when Voice is off, the
-    browser simply never calls this endpoint. Body: {"text": "...", "sid": "<chat ws's ctx[\"sid\"]>"}. This
+    speak-whatever-is-in-contents engine, so `contents` must be ONLY the raw text, never a wrapper/instruction.
+    See /api/tts_kokoro for the local, free, open-source alternative (added 2026-10-29) and the browser's own
+    Web Speech API (app.js) for the zero-backend default. Body: {"text": "...", "sid": "<chat ws's ctx[\"sid\"]>"}. This
     model's response `inline_data.data` is already a complete WAV file (unlike the Live API's raw PCM16, which
     needed manual header-wrapping) -- returned to the browser as-is."""
     body = await request.json()
