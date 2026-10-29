@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends bash coreutils 
 # nodejs/npm: so a fixredteam npm-audit fix can actually run `npm install <pkg>@<fix_version>` / `npm audit fix` and be verified for real,
 # instead of a hand-edited package.json/package-lock.json with no way to confirm it resolves. Debian bookworm's own apt nodejs package is
 # v20, which a real run showed npm itself warning EBADENGINE against (several current packages, e.g. nanoid@6, require ^22/^24/>=26) --
-# NodeSource's setup script instead, pinned to Node 24.x, the current Active LTS line as of 2026-10-24 (nodejs/release's own schedule;
+# NodeSource's setup script instead, pinned to Node 24.x, the current Active LTS line as of 2026-10-26 (nodejs/release's own schedule;
 # 26.x becomes Active LTS 2026-10-28). This curl runs at BUILD time only, on the host building the image -- it has nothing to do with the
 # sandbox's own runtime network isolation (--network none) or the install-only egress proxy's allowlist below.
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \

@@ -1,4 +1,4 @@
-# Custom Semgrep rules, added 2026-10-21 after a Strix pentest found three real issues our own gitleaks/bandit/
+# Custom Semgrep rules, added 2026-10-26 after a Strix pentest found three real issues our own gitleaks/bandit/
 # semgrep(registry)/pip-audit/npm-audit scans never caught (each needed cross-function or domain-specific
 # reasoning a generic registry rule pack doesn't encode). These are narrow, heuristic rules aimed at catching
 # the SAME real bug shapes again -- they will have false positives on unrelated code; that is expected and
@@ -11,7 +11,7 @@ rules:
       A route handler parameter whose name suggests another user's identifier (user_id, account_id, owner_id) is
       passed directly into a function call. If this reads or modifies that user's data, verify the CALLER'S OWN
       session identity is checked against it first -- otherwise this is an IDOR (CWE-639). Real example found
-      2026-10-21: GET /api/user-memory took user_id from the query string and returned that user's stored
+      2026-10-26: GET /api/user-memory took user_id from the query string and returned that user's stored
       conversation history to ANY logged-in caller, with no ownership check at all.
     patterns:
       - pattern-either:
@@ -43,7 +43,7 @@ rules:
       A variable is interpolated directly into an HTML string (f-string) without escaping. If this value can be
       attacker-controlled (e.g. a username supplied at signup) and the string is sent as an email body or rendered
       as HTML, this is HTML/content injection (CWE-79) -- escape with html.escape() or markupsafe.escape() before
-      interpolating. Real example found 2026-10-21: the signup confirmation email interpolated the unvalidated
+      interpolating. Real example found 2026-10-26: the signup confirmation email interpolated the unvalidated
       `username` straight into an HTML `<p>Hi {username},</p>` line, letting an unauthenticated signup deliver
       phishing markup to any email address under the platform's own verified sender.
     # Excludes a variable whose own name signals it was already escaped (e.g. username_safe) -- a cheap heuristic,
@@ -67,7 +67,7 @@ rules:
       re-validated against an allowlist or public-address check before the next request -- this can enable SSRF to
       internal addresses (CWE-918), especially if the "own host" check allows wildcard subdomain matching of a
       shared-DNS domain (e.g. sslip.io, nip.io) where the ATTACKER controls what the subdomain resolves to. Real
-      example found 2026-10-21: browser/scan.py followed up to 4 redirects without re-checking host_is_own() or
+      example found 2026-10-26: browser/scan.py followed up to 4 redirects without re-checking host_is_own() or
       resolve_public() on each hop, and creds.py's OWN_HOSTS wildcard-matched every *.sslip.io subdomain -- sslip.io
       resolves any subdomain to the IP literally encoded in it, so an attacker-chosen host passed the allowlist.
     patterns:
@@ -79,7 +79,7 @@ rules:
     message: >
       This Dockerfile installs a PHP version left exposed to PHP2Shell (CVE-2026-109618 / CVE-2026-109619),
       a pair of critical (CVSS 9.2) unauthenticated-RCE flaws in the PHP engine itself, patched upstream on
-      2026-10-21 at 8.2.35 / 8.3.36 / 8.4.27 / 8.5.12. Added as a deterministic rule, 2026-10-27, because
+      2026-10-26 at 8.2.35 / 8.3.36 / 8.4.27 / 8.5.12. Added as a deterministic rule, 2026-10-27, because
       public vulnerability-DB-based scanners (Trivy's OS-advisory matching) had NOT yet ingested this CVE
       pair at the time this rule was written -- confirmed empirically against php8.1 (Ubuntu 22.04) and
       php8.3 (Ubuntu 24.04) with a freshly-downloaded Trivy DB, both returning zero HIGH/CRITICAL hits for a

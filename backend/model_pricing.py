@@ -3,8 +3,8 @@ model_pricing.json (2026-10-27, Meta Global Hackathon) -- gpt-5.1/gpt-6-luna rem
 (see llm.PROVIDERS' own comments); Muse Spark is the one this fork actually runs on."""
 
 _RATES_PER_1M_USD = {
-    "gemini-3.8-flash": (0.75, 3.75),  # https://ai.google.dev/gemini-api/docs/pricing -- verified 2026-09-03 (see the full-featured version's model_pricing.json)
-    "claude-sonnet-5-5": (2.0, 10.0),  # https://platform.claude.com/docs/en/about-claude/pricing -- verified 2026-09-29 (see the full-featured version's model_pricing.json)
+    "gemini-3.8-flash": (0.75, 3.75),  # https://ai.google.dev/gemini-api/docs/pricing -- verified 2026-10-26 (see the full-featured version's model_pricing.json)
+    "claude-sonnet-5-5": (2.0, 10.0),  # https://platform.claude.com/docs/en/about-claude/pricing -- verified 2026-10-26 (see the full-featured version's model_pricing.json)
     # https://dev.meta.ai/docs/pricing-rate-limits -- verified 2026-10-27 against a real, live MUSE_API_KEY (confirmed genuine: real
     # model catalog from /v1/models, real tool-calling response from /v1/responses). Standard (non-contributor) tier -- the default, used
     # whenever a target isn't confirmed public (see core.run_turn's repo_visibility tracking); contributor is the public-repo tier.
@@ -18,7 +18,7 @@ _RATES_PER_1M_USD = {
 MUSE_VOICE_TRANSCRIBE_USD_PER_SECOND = 0.18 / 3600.0
 
 # gemini-3.8-flash-lite-tts's real rates, ported from Jiina's own verified model_pricing.json entry (Jiina repo,
-# utils/common_setup/model_pricing.json) -- https://ai.google.dev/gemini-api/docs/pricing, verified there 2026-10-04.
+# utils/common_setup/model_pricing.json) -- https://ai.google.dev/gemini-api/docs/pricing, verified there 2026-10-26.
 # Switched 2026-10-28 from gemini-3.8-live ($3.00/1M audio input, $12.00/1M audio output -- the full-duplex Live API,
 # audio rates) to this dedicated one-shot TTS model, which is meaningfully cheaper for Aegis's actual use (text in,
 # audio out, never audio in): $0.50/1M TEXT input, $6.00/1M AUDIO output -- half the output rate alone.

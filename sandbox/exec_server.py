@@ -8,14 +8,14 @@ that only mcp-ui also mounts) is the only way in. The MCP tools repl_run / repl_
         python + name: the code is saved as /REPL/<name>.py (empty code = run the saved file); python without a name runs from a scratch file; bash runs the command.
 
 A python run gets its own scratch directory (deleted afterwards) as the working directory, so user data does not pile up or leak between runs. A bash run is
-different (2026-10-20): its WORKING DIRECTORY persists across calls -- a `cd` in one bash_run is still in effect for the next one -- by starting each run in
+different (2026-10-26): its WORKING DIRECTORY persists across calls -- a `cd` in one bash_run is still in effect for the next one -- by starting each run in
 the directory recorded from the end of the last one (WORK_DIR by default) and recording the new one afterward (CWD_STATE). This is filesystem state only,
 never a live process: each run still gets its own fresh process group, killed in full on timeout exactly as before, so nothing can be left running in the
 background between calls. /REPL/work is the persistent playground (reset it yourself with `rm -rf /REPL/work/* /REPL/work/.[!.]* 2>/dev/null` for a fresh
 start); /REPL's top level still holds only reusable scripts and installed packages (/REPL/.pkgs), untouched by this. Limits: wall-clock timeout (whole
 process group killed), CPU seconds, file size, open files, output size, at most MAX_CONCURRENT runs at once, /REPL size cap.
 
-/aegis_out (added 2026-10-20) is a SEPARATE real folder on the DGX host, bind-mounted read-write, for exporting finished work out of the sandbox
+/aegis_out (added 2026-10-26) is a SEPARATE real folder on the DGX host, bind-mounted read-write, for exporting finished work out of the sandbox
 where the owner can actually see and back it up: zip a project there (zip/unzip are installed) as a durable copy that survives even a full /REPL volume
 loss. It is the one path this container can reach that is not inside its own private volumes; nothing else about the container's isolation changes."""
 import json
@@ -286,7 +286,7 @@ _ZIP_EXCLUDE = ["*/__pycache__/*", "*.pyc", "*/.pytest_cache/*", "*/.git/*"]
 
 def do_export(req: dict) -> tuple:
     """Zips a project under /REPL/work straight to /aegis_out -- a dedicated endpoint so the destination and naming are never something the
-    model has to get right in a hand-written shell command (2026-10-20: a real run zipped to a path INSIDE the sandbox and then tried to hand the
+    model has to get right in a hand-written shell command (2026-10-26: a real run zipped to a path INSIDE the sandbox and then tried to hand the
     file over as base64 text, which delivers nothing the owner can actually open). Before zipping, creates CHANGES.txt showing all file modifications."""
     project = str(req.get("project", "")).strip()
     try:
@@ -303,7 +303,7 @@ def do_export(req: dict) -> tuple:
     if not os.path.isdir(UPDATABLE_DIR):
         return 500, {"error": "/aegis_out is not mounted on this host -- nothing was zipped."}
 
-    # Create CHANGES.txt with before/after diff of all modified files (2026-10-24)
+    # Create CHANGES.txt with before/after diff of all modified files (2026-10-26)
     project_path = os.path.join(WORK_DIR, project)
     changes_file = os.path.join(project_path, "CHANGES.txt")
     changes_created = False
@@ -430,7 +430,7 @@ class UnixHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
         if os.path.exists(SOCK):
             os.unlink(SOCK)
         self.socket.bind(SOCK)
-        os.chmod(SOCK, 0o600)   # both ends run as the SAME uid 1001 (sandbox/Dockerfile), so owner-only is enough (bandit B103, fixed 2026-10-20 -- see proxy_server.py's matching note)
+        os.chmod(SOCK, 0o600)   # both ends run as the SAME uid 1001 (sandbox/Dockerfile), so owner-only is enough (bandit B103, fixed 2026-10-26 -- see proxy_server.py's matching note)
         self.server_name, self.server_port = "uds", 0
 
 

@@ -77,7 +77,7 @@ async def main():
     if os.path.exists(SOCK):
         os.unlink(SOCK)
     server = await asyncio.start_unix_server(handle, SOCK)
-    os.chmod(SOCK, 0o600)   # both ends (sandbox + this proxy) run as the SAME uid 1001 (sandbox/Dockerfile), so owner-only is enough; 0o666 was world-writable, 0o660 still group-writable for no reason (bandit B103, fixed 2026-10-20)
+    os.chmod(SOCK, 0o600)   # both ends (sandbox + this proxy) run as the SAME uid 1001 (sandbox/Dockerfile), so owner-only is enough; 0o666 was world-writable, 0o660 still group-writable for no reason (bandit B103, fixed 2026-10-26)
     async with server:
         await server.serve_forever()
 

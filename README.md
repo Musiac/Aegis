@@ -152,7 +152,7 @@ have (cross-account sandbox access, a DNS-rebinding SSRF, a SQL validator bypass
 sessions) — each one fixed, then verified closed by a fresh Strix run against the fixed code. The full
 before/after writeups are not in this repo yet, but the reverse comparison is:
 [Aegis scanning and fixing Strix's own source, 3 independent runs, each reaching 0 findings across
-all 5 static scanners in one pass](docs/strix_full_fix_verification_2026-10-24.md).
+all 5 static scanners in one pass](docs/strix_full_fix_verification_2026-10-26.md).
 
 ## Install
 
@@ -313,7 +313,7 @@ These twelve are the questions shown in the UI. Edit the placeholders (`OWNER/RE
 - [x] A real, repeatable fix loop for a cloned external repo — 3 independent runs against
   [usestrix/strix](https://github.com/usestrix/strix), each from a fresh clone, each reaching 0 findings
   across all 5 static scanners in one pass; see [the verification
-  writeup](docs/strix_full_fix_verification_2026-10-24.md).
+  writeup](docs/strix_full_fix_verification_2026-10-26.md).
 
 ## License
 
