@@ -357,3 +357,21 @@ async def check_scanner_versions(args: dict, ctx: dict) -> str:
         return json.dumps({"ok": False, "error": f"version check failed: HTTP {r.status_code}"})
 
     return r.text
+
+
+async def cleanup_redteam_scratch(args: dict, ctx: dict) -> str:
+    """Deletes every clone currently sitting in the redteam container's own clone-staging directory (/dynamic_pristine_rw) -- nothing in
+    there is reused across a browser session, so anything found here on startup is an orphan left behind by a previous session. Called
+    deterministically in code at the start of every new session (see web.py), alongside cleanup_sandbox_scratch and check_scanner_versions,
+    not something the model needs to call itself."""
+    why = _gate()
+    if why:
+        return why
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0)) as c:
+        r = await c.post(f"{URL}/cleanup_targets", headers={"Authorization": f"Bearer {TOKEN}"})
+
+    if r.status_code != 200:
+        return json.dumps({"ok": False, "error": f"cleanup failed: HTTP {r.status_code}"})
+
+    return r.text

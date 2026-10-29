@@ -54,6 +54,14 @@ async def bash_run(args: dict, ctx: dict) -> str:
     return json.dumps(_call("POST", "/run", {"kind": "bash", "code": command, "name": "", "timeout": timeout}, timeout=timeout + 15))
 
 
+async def cleanup_sandbox_scratch(args: dict, ctx: dict) -> str:
+    """Deletes this sandbox's accumulated scratch: /REPL/work, /REPL/tmp, every stale /dynamic_target/<name> (nothing reuses one across a
+    browser session), and /aegis_out beyond the newest 20 exports. Called deterministically in code at the start of every new session (see
+    web.py), not something the model needs to call itself -- exposed here mainly so core.py's startup path and a manual re-run share one
+    implementation. Exempt from the /REPL size cap: this is the one operation that must still work once /REPL is already full."""
+    return json.dumps(_call("POST", "/cleanup", {}, timeout=30.0))
+
+
 # Runs INSIDE the sandbox (python kind): builds CHANGES.txt as a REAL before/after diff (pristine copy vs the fixed working copy) and puts it into the zip.
 # The sandbox's own export step writes a CHANGES.txt too, but when the working copy has no usable git history it falls back to "files modified in the last
 # hour", which lists EVERY file of a freshly copied project and shows no diff at all (seen in a real run: LICENSE, .gitignore and 40 untouched files "modified").

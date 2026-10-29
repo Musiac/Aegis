@@ -14,6 +14,8 @@ except ImportError:
     pass
 
 from .core import ProviderError, new_session, pick_provider, run_turn
+from .tools.redteam_tools import cleanup_redteam_scratch
+from .tools.sandbox_tools import cleanup_sandbox_scratch
 
 # Where create_word_document's real files land -- no browser here to hand a download card to, so the CLI
 # just writes them to a real path on disk and prints it, same end result (a real .docx the operator opens).
@@ -54,6 +56,14 @@ async def main() -> None:
           "\"run redteam on github repo: https://github.com/owner/repo\"). Ctrl-D or \"exit\" to quit.")
     messages = new_session()
     ctx = {"emit_terminal_progress": _emit_terminal_progress, "emit_document": _emit_document}
+    # Same deterministic, code-driven cleanup the web UI runs on every reconnect (see web.py's ws_endpoint) -- the CLI and web UI share
+    # the exact same redteam/sandbox containers, so orphaned clones/scratch left by one are just as real from the other.
+    for label, fn in (("sandbox", cleanup_sandbox_scratch), ("redteam", cleanup_redteam_scratch)):
+        try:
+            result = await fn({}, ctx)
+            print(f"  -> cleanup_{label}_scratch() {result[:200]}")
+        except Exception as e:                                                  # noqa: BLE001 -- startup cleanup must never block the CLI from starting
+            print(f"  cleanup_{label}_scratch failed: {type(e).__name__}: {e}")
     loop = asyncio.get_running_loop()
     while True:
         try:

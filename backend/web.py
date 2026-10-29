@@ -36,7 +36,8 @@ from . import turnlog
 from .core import ProviderError, new_session, pick_provider, run_turn
 from .llm import available_providers, scan_fix_providers
 from .model_pricing import compute_asr_cost_usd, compute_gemini_tts_cost_usd
-from .tools.redteam_tools import check_scanner_versions
+from .tools.redteam_tools import check_scanner_versions, cleanup_redteam_scratch
+from .tools.sandbox_tools import cleanup_sandbox_scratch
 
 # muse-voice-transcribe-1.0's real cost isn't an LLM-token call, so it can't go through compute_cost_usd/session_cost_usd
 # the way core.run_turn's rounds do -- it's billed per second of audio, attributed to a push-to-talk utterance that
@@ -462,6 +463,24 @@ async def ws_endpoint(ws: WebSocket):
     # Lets the browser attribute push-to-talk's /ws/asr cost (billed per utterance, on a separate WebSocket -- see
     # _asr_cost_by_sid above) back to THIS session's displayed total, by passing it as /ws/asr?sid=...
     await ws.send_text(json.dumps({"type": "sid", "sid": ctx["sid"]}))
+
+    # Deterministic, code-driven, runs every single new connection -- not an LLM tool call, so it can never be skipped, forgotten or
+    # argued out of by the model the way a prompt-instructed step can be. Nothing in /dynamic_pristine_rw, /dynamic_target or /REPL/work
+    # is ever reused across a browser session (new_session() above starts fresh every reconnect), so this always deletes genuine
+    # orphans, never anything the operator is mid-task on. See sandbox/exec_server.py's do_cleanup and redteam/server.py's
+    # /cleanup_targets for what each actually removes.
+    try:
+        sandbox_result = await cleanup_sandbox_scratch({}, ctx)
+        await ws.send_text(json.dumps({"type": "terminal", "line": "-> cleanup_sandbox_scratch()"}))
+        await ws.send_text(json.dumps({"type": "terminal", "line": f"   {sandbox_result[:600]}"}))
+    except Exception as e:                                                       # noqa: BLE001 -- startup cleanup must never block the session from opening
+        await ws.send_text(json.dumps({"type": "terminal", "line": f"   cleanup_sandbox_scratch failed: {type(e).__name__}: {e}"}))
+    try:
+        redteam_result = await cleanup_redteam_scratch({}, ctx)
+        await ws.send_text(json.dumps({"type": "terminal", "line": "-> cleanup_redteam_scratch()"}))
+        await ws.send_text(json.dumps({"type": "terminal", "line": f"   {redteam_result[:600]}"}))
+    except Exception as e:                                                       # noqa: BLE001 -- same as above
+        await ws.send_text(json.dumps({"type": "terminal", "line": f"   cleanup_redteam_scratch failed: {type(e).__name__}: {e}"}))
 
     def _total_cost_usd() -> float:
         return (ctx.get("session_cost_usd", 0.0) + _asr_cost_by_sid.get(ctx["sid"], 0.0)

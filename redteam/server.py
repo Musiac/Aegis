@@ -215,6 +215,40 @@ async def clone_target(r: CloneReq):
                                                f"to populate the scannable/fixable working copy, then use target {name!r} with every redteam_*/export_project call from here on."}
 
 
+def _dir_bytes(path: str) -> int:
+    total = 0
+    for root, _d, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total
+
+
+@app.post("/cleanup_targets", dependencies=[Depends(_auth)])
+async def cleanup_targets():
+    """Deletes every CLONE DIRECTORY currently sitting in CLONE_STAGING_DIR (/dynamic_pristine_rw) -- nothing in here is ever reused across a
+    browser session (new_session() starts fresh every time the page connects), so any clone found here on startup is an orphan left behind by
+    a previous session that never got cleaned up. "self" is not stored here (it's install.sh's own src/self seed, untouched by this) so it is
+    never at risk. Only directories are removed: github_token.txt (the fixed, predetermined credential the system prompt tells the model to
+    pass as token_file for self-scanning a private Musiac/Aegis -- see system_prompt.py) lives at this same top level and is deliberately left
+    alone, a real regression caught live 2026-10-29 when an earlier version of this endpoint deleted it along with the clones and broke
+    self-scan's own private-repo clone step. Called once, deterministically in code (not an LLM tool call) right where the chat loop's own
+    check_scanner_versions runs, so a full host disk from months of accumulated clones can never silently block a brand-new session."""
+    before = _dir_bytes(CLONE_STAGING_DIR) if os.path.isdir(CLONE_STAGING_DIR) else 0
+    removed = []
+    if os.path.isdir(CLONE_STAGING_DIR):
+        for name in os.listdir(CLONE_STAGING_DIR):
+            p = os.path.join(CLONE_STAGING_DIR, name)
+            if not os.path.isdir(p):
+                continue                                 # credential files (github_token.txt) live here too -- never delete anything but a clone directory
+            removed.append(name)
+            _run(["rm", "-rf", p])
+    after = _dir_bytes(CLONE_STAGING_DIR) if os.path.isdir(CLONE_STAGING_DIR) else 0
+    return {"ok": True, "removed": sorted(removed), "freed_bytes": before - after}
+
+
 @app.post("/check_repo_access", dependencies=[Depends(_auth)])
 async def check_repo_access(r: CheckRepoReq):
     """Check if a git repository is accessible without cloning it. Returns accessibility status and error type (network/auth/invalid)."""

@@ -282,6 +282,57 @@ def do_run(req: dict) -> tuple:
 
 UPDATABLE_DIR = "/aegis_out"
 _ZIP_EXCLUDE = ["*/__pycache__/*", "*.pyc", "*/.pytest_cache/*", "*/.git/*"]
+DYNAMIC_TARGET_DIR = "/dynamic_target"     # sandbox-writable mirror of redteam's own CLONE_STAGING_DIR -- cleaned on its own side, see redteam/server.py's /cleanup_targets
+AEGIS_OUT_KEEP = 20                        # exported reports/zips to keep; /aegis_out otherwise grows forever, nothing ever deletes from it today
+
+
+def do_cleanup(_req: dict) -> tuple:
+    """Frees the scratch space that would otherwise only ever grow across sessions: old /REPL/work clutter and /REPL/tmp (the quota-capped
+    scratch disk every bash_run/repl_run writes into -- see REPL_CAP_BYTES above), every stale /dynamic_target/<name> working copy (nothing
+    reuses one across browser sessions -- new_session() in backend/web.py starts fresh every reconnect, so anything here is an orphan from a
+    prior session), and /aegis_out beyond the newest AEGIS_OUT_KEEP exports (every finished export_project/create_word_document lands here and
+    nothing has ever pruned it). /REPL/.pkgs and /REPL/.uvcache are deliberately left alone -- they are reusable install caches, not scratch,
+    and wiping them would just force every future pip/npm install to redo real network work. Exempt from REPL_CAP_BYTES on purpose: this is the
+    one operation that must still work when /REPL is already full (that is exactly the state it exists to recover from)."""
+    freed = {}
+
+    before = _dir_bytes(WORK_DIR) if os.path.isdir(WORK_DIR) else 0
+    shutil.rmtree(WORK_DIR, ignore_errors=True)
+    os.makedirs(WORK_DIR, exist_ok=True)
+    freed["REPL/work"] = before
+
+    tmp_dir = os.path.join(REPL_DIR, "tmp")
+    before = _dir_bytes(tmp_dir) if os.path.isdir(tmp_dir) else 0
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    os.makedirs(tmp_dir, exist_ok=True)
+    freed["REPL/tmp"] = before
+
+    before = _dir_bytes(DYNAMIC_TARGET_DIR) if os.path.isdir(DYNAMIC_TARGET_DIR) else 0
+    removed_targets = []
+    if os.path.isdir(DYNAMIC_TARGET_DIR):
+        for name in os.listdir(DYNAMIC_TARGET_DIR):
+            removed_targets.append(name)
+            shutil.rmtree(os.path.join(DYNAMIC_TARGET_DIR, name), ignore_errors=True)
+    freed["dynamic_target"] = before
+
+    freed_aegis_out, kept, removed_exports = 0, 0, []
+    if os.path.isdir(UPDATABLE_DIR):
+        entries = sorted(
+            (e for e in os.scandir(UPDATABLE_DIR) if e.is_file()),
+            key=lambda e: e.stat().st_mtime, reverse=True,
+        )
+        for e in entries:
+            kept += 1
+            if kept > AEGIS_OUT_KEEP:
+                try:
+                    freed_aegis_out += e.stat().st_size
+                    os.remove(e.path)
+                    removed_exports.append(e.name)
+                except OSError:
+                    pass
+    freed["aegis_out"] = freed_aegis_out
+
+    return 200, {"ok": True, "freed_bytes": freed, "removed_dynamic_targets": sorted(removed_targets), "removed_exports": sorted(removed_exports)}
 
 
 def do_export(req: dict) -> tuple:
@@ -412,11 +463,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path not in ("/run", "/export"):
+        if path not in ("/run", "/export", "/cleanup"):
             return self._send(404, {"error": "not found"})
         try:
             req = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
-            status, body = do_export(req) if path == "/export" else do_run(req)
+            if path == "/cleanup":
+                status, body = do_cleanup(req)
+            else:
+                status, body = do_export(req) if path == "/export" else do_run(req)
         except Exception as e:
             status, body = 500, {"error": f"{type(e).__name__}: {e}"}
         self._send(status, body)
