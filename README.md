@@ -253,7 +253,9 @@ pages between examples 1–6 and 7–12. The list lives in `backend/static/app.j
 
 ## Aegis observability
 
-Aegis works like a Hibachi Chef - cooks right on your table. As Aegis works diligently on each task you give to it, it opens a terminal for you to see exactly each command it is running in the sandbox, with the output of that command displayed right there to you. At the end of working session of Aegis, you can click on download to get the full log of its working session in front of you.  
+Aegis works like a Hibachi Chef - cooks right on your table. As Aegis works diligently on each task you give to it, it opens a terminal for you to see exactly each command it is running in the sandbox, with the output of that command displayed right there to you. At the end of working session of Aegis, you can click on download to get the full log of its working session in front of you.
+
+![Aegis mid-job: the terminal on the left filled with live tool calls (clone, bash_run, redteam_bandit, create_word_document) while the chat on the right narrates each step in plain language, ending with a downloadable Word report](docs/assets/aegis_terminal_live_run.jpg)
 
 ## Run log
 
