@@ -143,6 +143,31 @@ which parts of Aegis are a Meta model call and which are a plain OS/browser feat
 - A Gemini one-shot TTS path (`/api/tts`, `GEMINI_TTS_MODEL_NAME`) also still exists server-side from an
   earlier build, same reasoning as Kokoro (a competitor's model) — never called by the current UI either.
 
+## Run matrix: repeatability evidence
+
+Every row below is a real, timed run against the real backend (`[cj-turn]` structured log), not a
+synthetic benchmark. The 2026-10-29 rows below demonstrate a real bug and its fix, live: on
+`microsoft/TokenEconomizer` and `aws/tools-for-devops-agent` (55 and 80 findings respectively), the
+agent initially triaged every finding correctly but ended the turn without writing a single fix — a
+structural guard was added to `core.py` the same day (forces the turn to continue until `edit_file`,
+then `export_project` and `create_word_document`, have all run), and the identical repos were re-run
+afterward to confirm it actually works, not just that it looks plausible in isolation.
+
+| Date | Target | Phase | Wall time | Cost | Outcome |
+|---|---|---|---|---|---|
+| 2026-10-26 | [`usestrix/strix`](https://github.com/usestrix/strix) | Strix verification (run 1 of 3) | 3m 40s | $1.293 | Clean: gitleaks/Bandit/Semgrep/pip-audit/npm-audit all 0/0/0/0/0 |
+| 2026-10-28 | [`aws/sagemaker-python-sdk`](https://github.com/aws/sagemaker-python-sdk) | Early scan run | 4m 48s | $0.007 | Scanned only (gitleaks 7, Bandit 334, Semgrep 79, pip-audit 19, npm-audit 0) — the pre-guard turn-ends-early bug, named below |
+| 2026-10-28 | `self` (Aegis's own repo) | Full cycle incl. live ZAP | 1m 9s | $0.177 | Static clean + ZAP active scan (17 findings) → fixed → exported → reported |
+| 2026-10-29 | [`google/pica`](https://github.com/google/pica) | Repeatability run 1 | 53s | $0.029 | Fixed: 5 Bandit B113 → 0, exported, reported |
+| 2026-10-29 | [`microsoft/TokenEconomizer`](https://github.com/microsoft/TokenEconomizer) | Repeatability run 1 (pre-guard) | 20m 15s | $0.202 | **Stalled:** 55 findings triaged, 0 fixes applied, no export/report |
+| 2026-10-29 | [`aws/tools-for-devops-agent`](https://github.com/aws/tools-for-devops-agent) | Repeatability run 1 (pre-guard) | 27m 47s | $0.296 | **Stalled:** 80 findings triaged, 0 fixes applied, no export/report |
+| 2026-10-29 | `google/pica` | Repeatability run 2 (post-guard) | 53s | $0.023 | Fixed again, identical result — confirms the guard doesn't change a working run |
+| 2026-10-29 | `microsoft/TokenEconomizer` | Repeatability run 2 (post-guard) | 26m 32s | $0.349 | **Fixed:** guard fired once ("fixed but not exported"), then `export_project`/`create_word_document` ran — zip + Word report delivered |
+| 2026-10-29 | `aws/tools-for-devops-agent` | Repeatability run 2 (post-guard) | 46m 52s | $0.616 | **Fixed:** guard fired once ("never fixed"), then 1 `edit_file` + `export_project` + `create_word_document` — zip + Word report delivered |
+
+All costs are the real, metered Muse token cost for the whole conversation (every scan + every fix +
+the report), computed by `backend/model_pricing.py` from actual token usage — never an estimate.
+
 ## Why this exists
 
 Static pattern-matchers (Semgrep, Bandit) and semantic pentesters (like
