@@ -1,4 +1,4 @@
-# Full fix verification -- usestrix/strix, 2026-10-24
+# Full fix verification -- usestrix/strix, 2026-10-26
 
 Three separate, independent runs of the exact same request against the real `backend` chat loop --
 "go to https://github.com/usestrix/strix and scan and fix the issues in it." -- each starting from a
@@ -10,7 +10,7 @@ earlier runs against this exact target surfaced real, reproducible bugs (wrong-l
 placement, npm fixes never attempted, a transitive dependency with no line to edit, false positives
 diagnosed but never suppressed, batching several Semgrep fixes into one re-scan). Each bug was
 confirmed live, fixed in the prompt, and re-tested before moving on -- see the git history of
-`backend/system_prompt.py` around 2026-10-24 for the full list of fixes and their citations.
+`backend/system_prompt.py` around 2026-10-26 for the full list of fixes and their citations.
 
 ## Same starting point, every run
 
@@ -26,9 +26,9 @@ confirmed live, fixed in the prompt, and re-tested before moving on -- see the g
 
 | Run | Wall-clock time | LLM cost | Final: gitleaks / Bandit / Semgrep / pip-audit / npm-audit | Artifacts |
 |---|---|---|---|---|
-| 1 (first clean run, 2026-10-24 03:30) | ~3m 40s | $1.2934 | 0 / 0 / 0 / 0 / 0 | `usestrix_strix_2026-10-24-07-33-11.zip`, `Static_fix_report_--_usestrix_strix_2026-10-24T07-33-43.docx` |
-| 2 (verification, 2026-10-24 08:50) | ~4m 35s | $0.9379 | 0 / 0 / 0 / 0 / 0 | `usestrix_strix_2026-10-24-12-54-05.zip`, `Static_fix_report_--_usestrix_strix_2026-10-24T12-54-47.docx` |
-| 3 (verification, 2026-10-24 08:55) | ~3m 35s | $0.6597 | 0 / 0 / 0 / 0 / 0 | `usestrix_strix_2026-10-24-12-58-25.zip`, `Static_fix_report_--_usestrix_strix_2026-10-24T12-58-53.docx` |
+| 1 (first clean run, 2026-10-26 03:30) | ~3m 40s | $1.2934 | 0 / 0 / 0 / 0 / 0 | `usestrix_strix_2026-10-26-07-33-11.zip`, `Static_fix_report_--_usestrix_strix_2026-10-26T07-33-43.docx` |
+| 2 (verification, 2026-10-26 08:50) | ~4m 35s | $0.9379 | 0 / 0 / 0 / 0 / 0 | `usestrix_strix_2026-10-26-12-54-05.zip`, `Static_fix_report_--_usestrix_strix_2026-10-26T12-54-47.docx` |
+| 3 (verification, 2026-10-26 08:55) | ~3m 35s | $0.6597 | 0 / 0 / 0 / 0 / 0 | `usestrix_strix_2026-10-26-12-58-25.zip`, `Static_fix_report_--_usestrix_strix_2026-10-26T12-58-53.docx` |
 
 **Totals across the 3 runs: ~11m 50s wall-clock, $2.891 LLM cost.**
 
