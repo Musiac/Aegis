@@ -188,6 +188,8 @@ network namespace with `redteam/` or `pentestlive/`, which need to reach the int
 
 ## Architecture
 
+![Aegis architecture, high level: the operator talks to Aegis, which calls 1 active + 6 passive scan tools plus guardrails, runs commands in a locked-down sandbox, and can clone a repo, pentest it live, and write fixes back](docs/assets/aegis_architecture-highlevel.png)
+
 ![Aegis architecture: browser → aegis-backend-web → aegis-redteam/pentestlive/sandbox-proxy, with the code-fix sandbox isolated behind --network none, Meta's Model API and GitHub as the only external services, and host-mounted volumes for scan targets and exported fixes](docs/assets/aegis_architecture-technical.png)
 
 Three small containers + a thin backend:

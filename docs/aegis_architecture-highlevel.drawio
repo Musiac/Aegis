@@ -1,0 +1,175 @@
+<mxfile host="app.diagrams.net" agent="Aegis">
+  <diagram name="Aegis Architecture" id="aegis-arch">
+    <mxGraphModel dx="933" dy="605" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="operator" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" value="&lt;div&gt;User&lt;/div&gt;&lt;div&gt;(Browser)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="140" x="30" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="muse" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;" value="&lt;div&gt;Meta API&lt;/div&gt;&lt;div&gt;(muse-spark-1.3/muse-voice-transcribe-1.0)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="70" width="220" x="30" y="322.5" as="geometry" />
+        </mxCell>
+        <mxCell id="github" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;" value="GitHub Repo (external)" vertex="1">
+          <mxGeometry height="37.5" width="150" x="1090" y="245.5" as="geometry" />
+        </mxCell>
+        <mxCell id="net_boundary" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=none;strokeColor=#82b366;dashed=1;fontSize=14;fontStyle=1;strokeWidth=3;" value="&lt;b&gt;&lt;font style=&quot;font-size: 18px;&quot;&gt;Aegis(&lt;/font&gt;&lt;font style=&quot;font-size: 18px;&quot;&gt;&lt;span style=&quot;font-weight: normal;&quot;&gt;&lt;b&gt;A&lt;/b&gt;gentic &lt;b&gt;E&lt;/b&gt;nterprise &lt;b&gt;G&lt;/b&gt;uard for &lt;b&gt;I&lt;/b&gt;nfo&lt;b&gt;S&lt;/b&gt;ec&lt;/span&gt;&lt;/font&gt;&lt;font style=&quot;font-size: 18px;&quot;&gt;) - High Level Diagram&lt;/font&gt;&lt;/b&gt;" vertex="1">
+          <mxGeometry height="550" width="790" x="260" y="10" as="geometry" />
+        </mxCell>
+        <mxCell id="backend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" value="&lt;div&gt;Aegis&amp;nbsp;&lt;/div&gt;&lt;div&gt;with Tool calling capabilities&lt;/div&gt;" vertex="1">
+          <mxGeometry height="90" width="230" x="300" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="redteam" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" value="&lt;div&gt;1- Active and&lt;/div&gt;&lt;div&gt;6 - Passive Scan Tools&lt;/div&gt;&lt;div&gt;+ Guardrails&lt;/div&gt;" vertex="1">
+          <mxGeometry height="90" width="260" x="710" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pentestlive" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" value="&lt;div&gt;Tool to Scan liveness&amp;nbsp;&lt;/div&gt;&lt;div&gt;of 3rd-party URL&lt;/div&gt;" vertex="1">
+          <mxGeometry height="80" width="220" x="290" y="460" as="geometry" />
+        </mxCell>
+        <mxCell id="sandboxproxy" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" value="sandbox-proxy" vertex="1">
+          <mxGeometry height="70" width="260" x="330" y="265" as="geometry" />
+        </mxCell>
+        <mxCell id="sandbox_boundary" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;fontSize=13;fontStyle=1;" value="locked-down sandbox" vertex="1">
+          <mxGeometry height="120" width="270" x="640" y="255" as="geometry" />
+        </mxCell>
+        <mxCell id="sandbox" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" value="Aegis Runs command&amp;nbsp;" vertex="1">
+          <mxGeometry height="75" width="230" x="660" y="283" as="geometry" />
+        </mxCell>
+        <mxCell id="vol_boundary" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=none;strokeColor=#666666;dashed=1;fontSize=13;fontStyle=1;strokeWidth=3;" value="&lt;div&gt;Mac/Windows Host mounts&amp;nbsp;&lt;/div&gt;&lt;div&gt;(survives container recreate)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="140" width="650" x="250" y="600" as="geometry" />
+        </mxCell>
+        <mxCell id="vol_targets" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" value="&lt;div&gt;User gives Key file&amp;nbsp;&lt;/div&gt;&lt;div&gt;to access Git Repo&lt;/div&gt;&lt;div&gt;+ Cloned Repo&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="55" width="180" x="630" y="660" as="geometry" />
+        </mxCell>
+        <mxCell id="vol_out" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" value="Fixed Repo code is here" vertex="1">
+          <mxGeometry height="55" width="140" x="330" y="660" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="operator" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;" target="backend" value="Talk/Chat">
+          <mxGeometry relative="1" x="-0.3846" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="270" y="90" />
+              <mxPoint x="270" y="90" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;dashed=1;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="muse" value="Reasoning (muse-spark-1.3)&lt;br&gt;ASR (muse-voice-transcribe-1.0)">
+          <mxGeometry relative="1" x="0.4015" as="geometry">
+            <mxPoint as="offset" />
+            <mxPoint x="300" y="140" as="sourcePoint" />
+            <mxPoint x="140" y="315" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="redteam" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;dashed=1;" target="github" value="clone repo to local">
+          <mxGeometry relative="1" x="0.5214" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;entryX=0;entryY=0.25;entryDx=0;entryDy=0;" target="redteam" value="Active/Passive Scan Tool Call">
+          <mxGeometry relative="1" x="-0.0959" y="-22" as="geometry">
+            <mxPoint x="1" y="1" as="offset" />
+            <Array as="points">
+              <mxPoint x="530" y="102.5" />
+            </Array>
+            <mxPoint x="530" y="100" as="sourcePoint" />
+            <mxPoint x="709.9999999999998" y="110" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;" target="pentestlive" value="Active Scan Tool Call">
+          <mxGeometry relative="1" x="0.4483" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="320" y="420" />
+              <mxPoint x="320" y="420" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;" target="sandboxproxy" value="Runs commands">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="415" y="250" />
+              <mxPoint x="415" y="250" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="sandboxproxy" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" target="sandbox">
+          <mxGeometry relative="1" x="-0.2265" as="geometry">
+            <Array as="points">
+              <mxPoint x="600" y="320" />
+              <mxPoint x="600" y="320" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="sandbox" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;" target="sandboxweb" value="Start/Stop Server/Write fix">
+          <mxGeometry relative="1" x="-0.0667" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="830" y="410" />
+              <mxPoint x="830" y="410" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="redteam" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;exitX=0.993;exitY=0.916;exitDx=0;exitDy=0;exitPerimeter=0;" target="sandboxweb" value="active pentest">
+          <mxGeometry relative="1" x="-0.6362" y="-10" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="980" y="162.4" />
+              <mxPoint x="980" y="479.9" />
+            </Array>
+            <mxPoint x="970" y="170" as="sourcePoint" />
+            <mxPoint x="970" y="460" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="sandbox" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;entryX=0.394;entryY=0.007;entryDx=0;entryDy=0;entryPerimeter=0;" target="vol_targets" value="read/write fixes">
+          <mxGeometry relative="1" x="0.2031" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="700" y="509" />
+            </Array>
+            <mxPoint x="700" y="352" as="sourcePoint" />
+            <mxPoint x="530" y="647.75" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e11" edge="1" parent="1" source="sandbox" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;exitX=0.005;exitY=0.878;exitDx=0;exitDy=0;exitPerimeter=0;" target="vol_out" value="Save fixed Repo">
+          <mxGeometry relative="1" x="-0.3517" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="660" y="348.9" />
+              <mxPoint x="660" y="350" />
+              <mxPoint x="540" y="350" />
+              <mxPoint x="540" y="580" />
+              <mxPoint x="400" y="580" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e12" edge="1" parent="1" source="sandboxweb" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;dashed=1;entryX=0.817;entryY=0.041;entryDx=0;entryDy=0;entryPerimeter=0;" target="vol_targets" value="read-only scan target">
+          <mxGeometry relative="1" x="-0.4269" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="777.06" y="620" />
+              <mxPoint x="777.06" y="620" />
+            </Array>
+            <mxPoint x="725" y="147.5" as="sourcePoint" />
+            <mxPoint x="620" y="635" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="legend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;align=left;fontSize=11;" value="Legend&lt;br&gt;Green = Docker container for Aegis&lt;br&gt;Red dashed = locked-down sandbox&lt;br&gt;Orange = external service (Meta API / GitHub)&lt;br&gt;Grey = Mac/Windows mounted volume, accessible from Sandobx" vertex="1">
+          <mxGeometry height="120" width="240" x="10" y="420" as="geometry" />
+        </mxCell>
+        <mxCell id="GYNbHo0G-CETyHOJn-I0-2" edge="1" parent="1" source="redteam" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;dashed=1;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=1.003;entryY=0.174;entryDx=0;entryDy=0;entryPerimeter=0;" target="vol_targets" value="">
+          <mxGeometry relative="1" x="-0.9365" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1070" y="147.5" />
+              <mxPoint x="1070" y="669.6" />
+            </Array>
+            <mxPoint x="859.9999999999998" y="147.5" as="sourcePoint" />
+            <mxPoint x="1017.5" y="470" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="sandboxweb" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" value="&lt;div&gt;Cloned Repo at&lt;/div&gt;&lt;div&gt;www.sandbox.com:8900&lt;/div&gt;&lt;div&gt;(for pentest)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="80" width="195" x="770" y="470" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
