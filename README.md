@@ -188,7 +188,7 @@ network namespace with `redteam/` or `pentestlive/`, which need to reach the int
 
 ## Architecture
 
-![Aegis architecture: browser → aegis-backend-web → aegis-redteam/pentestlive/sandbox-proxy, with the code-fix sandbox isolated behind --network none, Meta's Model API and GitHub as the only external services, and host-mounted volumes for scan targets and exported fixes](docs/assets/aegis_architecture.png)
+![Aegis architecture: browser → aegis-backend-web → aegis-redteam/pentestlive/sandbox-proxy, with the code-fix sandbox isolated behind --network none, Meta's Model API and GitHub as the only external services, and host-mounted volumes for scan targets and exported fixes](docs/assets/aegis_architecture-technical.png)
 
 Three small containers + a thin backend:
 
