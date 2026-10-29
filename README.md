@@ -211,6 +211,23 @@ network namespace with `redteam/` or `pentestlive/`, which need to reach the int
 (pip-audit/npm-audit's advisory databases) or a target host. "One docker" here means one command
 (`bash install.sh`), not literally one container.
 
+## Built on LightMA™
+
+**LightMA™: our own lightweight, auditable agentic framework**
+
+LightMA™ is the internal framework IdeaNirvana AI built for straightforward, reliable tool-calling
+agents: a simple, auditable round loop that scans, reasons and calls real tools, with structural guards
+built in to catch a job that stalls or reports itself done before it actually is. It is a lightweight
+multi-agentic framework by design.
+
+Before building it we looked at the frameworks in common use — LangChain, LangGraph, Microsoft Agent
+Framework, Google ADK and Strands — but wanted something simple enough to read and reason about end to
+end, for a single-operator agent doing real, consequential work (writing code fixes, running active
+security scans). So we developed our own: LightMA™.
+
+Aegis is our single-agent on LightMA™, capable of running real security scans, writing real fixes, and
+generating real reports in a single conversation. Since then we have been adding skills to it.
+
 ## Architecture
 
 ![Aegis architecture, high level: the operator talks to Aegis, which calls 1 active + 6 passive scan tools plus guardrails, runs commands in a locked-down sandbox, and can clone a repo, pentest it live, and write fixes back](docs/assets/aegis_architecture-highlevel.png)
