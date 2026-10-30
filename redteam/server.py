@@ -773,18 +773,38 @@ async def _check_pypi_version(package: str, current: str) -> dict:
 
 
 async def _check_github_release(repo: str, current: str) -> dict:
-    """Check if a GitHub repo has a newer release."""
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as c:
-            r = await c.get(f"https://api.github.com/repos/{repo}/releases/latest")
-            if r.status_code != 200:
-                return {"name": repo.split("/")[1], "current": current, "latest": None, "status": "error", "error": "github api error"}
-            data = r.json()
-            latest = data.get("tag_name", "")
-            is_latest = latest == current
-            return {"name": repo.split("/")[1], "current": current, "latest": latest, "status": "latest" if is_latest else "update_available"}
-    except Exception as e:
-        return {"name": repo.split("/")[1], "current": current, "latest": None, "status": "error", "error": str(e)[:100]}
+    """Check if a GitHub repo has a newer release. Unauthenticated GitHub API calls are capped at 60/hour per IP --
+    real and genuinely hit live 2026-10-30 after repeated testing (confirmed via the response's own
+    x-ratelimit-remaining: 0 header, not guessed). Authenticates with GITHUB_CLONE_TOKEN when it's configured
+    (already present for private-repo cloning, reused here for free) -- that raises the cap to 5000/hour, which
+    this check's own call volume never comes close to. Retries once, after a short pause, ONLY on a genuine
+    transient failure (a network exception, or a 5xx from GitHub itself) -- retrying a 403 rate-limit immediately
+    would just burn the same exhausted quota a second time for nothing, so that case fails straight through with
+    a clear, honest reason instead."""
+    name = repo.split("/")[1]
+    headers = {"Authorization": f"Bearer {GITHUB_CLONE_TOKEN}"} if GITHUB_CLONE_TOKEN else {}
+    last_error = "unknown error"
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as c:
+                r = await c.get(f"https://api.github.com/repos/{repo}/releases/latest", headers=headers)
+                if r.status_code == 200:
+                    data = r.json()
+                    latest = data.get("tag_name", "")
+                    return {"name": name, "current": current, "latest": latest, "status": "latest" if latest == current else "update_available"}
+                if r.status_code == 403 and r.headers.get("x-ratelimit-remaining") == "0":
+                    reset = r.headers.get("x-ratelimit-reset")
+                    when = f" (resets {reset})" if reset else ""
+                    return {"name": name, "current": current, "latest": None, "status": "error",
+                            "error": f"GitHub API rate limit reached{when}" + ("" if GITHUB_CLONE_TOKEN else " -- set GITHUB_CLONE_TOKEN to raise the limit from 60/hour to 5000/hour")}
+                last_error = f"github api error (HTTP {r.status_code})"
+                if r.status_code < 500:
+                    break   # a non-rate-limit 4xx won't be fixed by retrying either
+        except Exception as e:                                                   # noqa: BLE001 -- a genuinely transient failure, worth the one retry below
+            last_error = str(e)[:100]
+        if attempt == 0:
+            await asyncio.sleep(1.5)
+    return {"name": name, "current": current, "latest": None, "status": "error", "error": last_error}
 
 
 async def _check_npm_version() -> dict:
