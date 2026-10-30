@@ -21,6 +21,7 @@ CHECKS = [
     {
         "key": "write_outside_sandbox",
         "progress": "now running: trying to write outside the sandbox's writable paths (a read-only mount and the read-only root filesystem)...",
+        "simple": "Now testing: trying to create a file outside the sandbox...",
         "cmd": (
             "echo '--- touch /dynamic_pristine/__verify_test (read-only clone mount) ---'; "
             "touch /dynamic_pristine/__verify_test 2>&1; "
@@ -33,11 +34,13 @@ CHECKS = [
     {
         "key": "external_network",
         "progress": "now running: trying a real HTTPS request to www.ibm.com (an external site this sandbox has no reason to reach)...",
+        "simple": "Now testing: trying to reach www.ibm.com from inside the sandbox...",
         "cmd": "curl -s -m 3 -o /dev/null -w 'http_code=%{http_code} exit_code=%{exitcode}\\n' https://www.ibm.com 2>&1; echo CHECK_DONE",
     },
     {
         "key": "resource_caps",
         "progress": "now running: reading the real memory/process/CPU caps the Docker host enforces on this container...",
+        "simple": "Now testing: checking the sandbox's memory/CPU/process limits...",
         "cmd": (
             "echo \"memory.max=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo unknown)\"; "
             "echo \"pids.max=$(cat /sys/fs/cgroup/pids.max 2>/dev/null || echo unknown)\"; "
@@ -54,11 +57,21 @@ async def verify_sandbox_safety(args: dict, ctx: dict) -> str:
     before doing any real work in it, so the operator sees the isolation guarantees demonstrated, not just asserted."""
     results = []
     emit = ctx.get("emit_terminal_progress")
+    emit_status = ctx.get("emit_status")   # the short transient "now doing X" line shown live next to the busy
+                                            # indicator (see web.py) -- plain-English per-check narration, found
+                                            # missing live 2026-10-30: this used to be covered by the old
+                                            # automatic-greeting instructions (removed when the greeting was
+                                            # shortened), so a mid-task call had nothing simple in the CHAT pane
+                                            # at all, only the technical terminal-pane line below.
     for c in CHECKS:
+        if emit_status:
+            await emit_status(c["simple"])
         if emit:
             await emit("verify_sandbox_safety", c["progress"])
         raw = _call("POST", "/run", {"kind": "bash", "code": c["cmd"], "name": "", "timeout": 10}, timeout=20)
         results.append({"check": c["key"], "cmd": c["cmd"], "raw": raw})
+    if emit_status:
+        await emit_status("")   # clears the transient line once all 3 checks are done
     return json.dumps({
         "ok": True,
         "note": (
