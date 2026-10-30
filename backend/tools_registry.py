@@ -194,9 +194,9 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "update_scanner_tools",
-        "description": "Actually upgrades the named outdated scanner tool(s) to their real latest release, live, for the rest of this "
-                        "session (it does NOT survive a container restart/recreate -- say so honestly if asked). Only call this AFTER the "
-                        "operator has explicitly said yes to an update you offered -- never on your own initiative. tools must be real names "
+        "description": "Actually upgrades the named outdated scanner tool(s) to their real latest release, written to this host's own "
+                        "persistent tool-update folder -- it survives a container restart/recreate, it is not a session-only change. Only "
+                        "call this AFTER the operator has explicitly said yes to an update you offered -- never on your own initiative. tools must be real names "
                         "from check_scanner_versions's own outdated_tools list, never invented or guessed. Re-checks and returns the final "
                         "real versions itself, so call check_scanner_versions again only if you need a check with nothing else happening.",
         "parameters": {"type": "object", "properties": {

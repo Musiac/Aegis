@@ -17,6 +17,7 @@ import ipaddress
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -798,21 +799,53 @@ async def _check_npm_version() -> dict:
 
 # --- Live, same-session tool update (added 2026-10-30) ---
 # This container's root filesystem is READ-ONLY and it runs as a non-root user (redteam/Dockerfile) -- a real
-# security boundary, same spirit as the sandbox's own --network none. But HOME=/tmp here, and /tmp IS a real
-# writable+exec tmpfs (already how ZAP_HOME/_zap_proc work) -- `pip install --user` and a fresh binary download
-# both land there, never touching the read-only root at all. This genuinely upgrades what this RUNNING container
-# uses for the rest of its life; it does NOT touch the baked-in image, so a container restart/recreate reverts to
-# whatever redteam/Dockerfile still pins -- Aegis is told to say so honestly, never imply this survives a restart.
-_USER_BIN = os.path.join(os.environ.get("HOME", "/tmp"), ".local", "bin")
+# security boundary, same spirit as the sandbox's own --network none. /tool_updates is a HOST BIND MOUNT (install.sh
+# -v "$(pwd)/redteam_tool_updates:/tool_updates", owned by this container's own uid 1000, same pattern as
+# dynamic_pristine_rw) -- not the ephemeral /tmp tmpfs this used on 2026-10-30's first cut, which lost every
+# update on the next container restart/recreate and made the operator re-request the same update every session
+# (owner's own catch, same day: "that will be cumbersome for the user"). Writing here instead means a live update
+# IS permanent -- it persists exactly the same way a fix written into dynamic_target/<name> does -- with zero
+# extra "restore on startup" step needed for the pip/binary tools: PATH is set to prefer _USER_BIN before this
+# module finishes importing (below), so a process that starts fresh after a restart finds last session's updated
+# binary already sitting there and uses it immediately. ZAP is the one exception (invoked by a fixed path, not
+# found via PATH) -- see _restore_zap_from_disk() below for its own explicit startup check.
+TOOL_UPDATES_DIR = os.environ.get("TOOL_UPDATES_DIR", "/tool_updates")
+_USER_BIN = os.path.join(TOOL_UPDATES_DIR, "bin")
+_ZAP_PERSIST_DIR = os.path.join(TOOL_UPDATES_DIR, "zap_latest")
 _ACTIVE_ZAP = {"sh": "/opt/zap/zap.sh", "version": "v2.17.0"}   # no cheap `--version` without starting the whole
                                                                   # daemon, so the live-updated version is tracked
-                                                                  # here instead of queried fresh each time
+                                                                  # here instead of queried fresh each time; see
+                                                                  # _restore_zap_from_disk() for how this is
+                                                                  # repopulated from a PRIOR session's update
 
 
 def _ensure_user_bin_on_path() -> None:
     os.makedirs(_USER_BIN, exist_ok=True)
+    os.environ["PYTHONUSERBASE"] = TOOL_UPDATES_DIR   # redirects `pip install --user` here instead of $HOME/.local
+                                                        # (which would be /tmp, ephemeral) -- PYTHONUSERBASE, unlike
+                                                        # HOME, controls ONLY this, so nothing else about the
+                                                        # process's environment needs to change for it.
     if _USER_BIN not in os.environ.get("PATH", "").split(":"):
         os.environ["PATH"] = _USER_BIN + ":" + os.environ.get("PATH", "")
+
+
+def _restore_zap_from_disk() -> None:
+    """Called once at module import (below) -- if a PRIOR session's _update_zap() left a real install sitting in
+    _ZAP_PERSIST_DIR (host-mounted, survives this fresh process same as the pip/binary tools do via PATH), point
+    _ACTIVE_ZAP at it immediately rather than starting this session back on the image's baked-in version."""
+    sh = os.path.join(_ZAP_PERSIST_DIR, "zap.sh")
+    version_file = os.path.join(_ZAP_PERSIST_DIR, ".version")
+    if os.path.isfile(sh) and os.path.isfile(version_file):
+        try:
+            version = open(version_file, encoding="utf-8").read().strip()
+        except OSError:
+            return
+        if version:
+            _ACTIVE_ZAP["sh"], _ACTIVE_ZAP["version"] = sh, version
+
+
+_ensure_user_bin_on_path()
+_restore_zap_from_disk()
 
 
 async def _live_cli_version(cmd: list, pattern: str, fallback: str) -> str:
@@ -883,17 +916,19 @@ async def _update_github_binary(name: str, repo: str, extract_member: str) -> di
 
 
 async def _update_zap() -> dict:
-    """Same official-distribution tarball Dockerfile uses at build time, extracted fresh into its own /tmp dir;
-    _ACTIVE_ZAP is updated only once the new install is verified present, and _zap_start() (see there) always
-    reads _ACTIVE_ZAP["sh"] rather than a hardcoded path, so a live update takes effect on the NEXT scan without
-    needing anything else changed."""
+    """Same official-distribution tarball Dockerfile uses at build time, extracted into a scratch dir first (so a
+    failed download/extract never disturbs whatever is already working), then moved into _ZAP_PERSIST_DIR -- the
+    host-mounted, persistent location _restore_zap_from_disk() reads back on a future fresh container start -- in
+    one atomic rename. _ACTIVE_ZAP is updated only once the new install is verified present and in its final
+    location, and _zap_start() (see there) always reads _ACTIVE_ZAP["sh"] rather than a hardcoded path, so a live
+    update takes effect on the NEXT scan without needing anything else changed."""
     rel = await _check_github_release("zaproxy/zaproxy", "")
     latest = rel.get("latest")
     if not latest:
         return {"name": "zaproxy", "ok": False, "from": None, "to": None, "error": "could not reach GitHub to find the latest release"}
     ver_num = latest.lstrip("v")
-    new_home = os.path.join(tempfile.gettempdir(), f"zap_install_{uuid.uuid4().hex}")
-    os.makedirs(new_home, exist_ok=True)
+    staging = os.path.join(TOOL_UPDATES_DIR, f"zap_staging_{uuid.uuid4().hex}")
+    os.makedirs(staging, exist_ok=True)
     dest_tar = os.path.join(tempfile.gettempdir(), f"zap_update_{uuid.uuid4().hex}.tar.gz")
     try:
         async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as c:
@@ -902,23 +937,27 @@ async def _update_zap() -> dict:
                 return {"name": "zaproxy", "ok": False, "from": None, "to": None, "error": f"download failed: HTTP {r.status_code}"}
             with open(dest_tar, "wb") as f:
                 f.write(r.content)
-        code, raw = _run(["tar", "-xzf", dest_tar, "-C", new_home, "--strip-components=1"], timeout=60)
+        code, raw = _run(["tar", "-xzf", dest_tar, "-C", staging, "--strip-components=1"], timeout=60)
         if code != 0:
             return {"name": "zaproxy", "ok": False, "from": None, "to": None, "error": f"extract failed: {raw[:300]}"}
-        new_sh = os.path.join(new_home, "zap.sh")
+        new_sh = os.path.join(staging, "zap.sh")
         if not os.path.isfile(new_sh):
             return {"name": "zaproxy", "ok": False, "from": None, "to": None, "error": "downloaded archive did not contain zap.sh"}
         os.chmod(new_sh, 0o755)
+        with open(os.path.join(staging, ".version"), "w", encoding="utf-8") as f:
+            f.write(latest)
     finally:
         try:
             os.remove(dest_tar)
         except OSError:
             pass
-    old_version = _ACTIVE_ZAP["version"]
-    _ACTIVE_ZAP["sh"], _ACTIVE_ZAP["version"] = new_sh, latest
-    if _zap_proc["p"] and _zap_proc["p"].poll() is None:   # a currently-running ZAP is still the OLD binary -- stop it so
-        _zap_proc["p"].terminate()                          # the next _zap_start() launches fresh with the new one
+    if _zap_proc["p"] and _zap_proc["p"].poll() is None:   # a currently-running ZAP is still the OLD binary -- stop it BEFORE
+        _zap_proc["p"].terminate()                          # replacing the directory it's launched from
         _zap_proc["p"] = None
+    old_version = _ACTIVE_ZAP["version"]
+    shutil.rmtree(_ZAP_PERSIST_DIR, ignore_errors=True)
+    os.rename(staging, _ZAP_PERSIST_DIR)   # atomic within the same filesystem (both under TOOL_UPDATES_DIR)
+    _ACTIVE_ZAP["sh"], _ACTIVE_ZAP["version"] = os.path.join(_ZAP_PERSIST_DIR, "zap.sh"), latest
     return {"name": "zaproxy", "ok": True, "from": old_version, "to": latest}
 
 
@@ -931,8 +970,9 @@ class UpdateToolsReq(BaseModel):
 
 @app.post("/update_tools", dependencies=[Depends(_auth)])
 async def update_tools(r: UpdateToolsReq):
-    """Updates exactly the named tools, live, for the rest of THIS container's life (see the module comment
-    above for why /tmp is where this can safely happen without touching the read-only root). Never silently
+    """Updates exactly the named tools, live, persisted to the host-mounted /tool_updates (see the module comment
+    above for why that's where this can safely happen without touching the read-only root, and why it survives a
+    restart/recreate rather than just lasting this container's current life). Never silently
     skips a requested tool -- an unknown/non-updatable name (npm: status is already "system-managed" and never
     offered; ZAP sub-add-ons aren't a thing this tracks) comes back as its own ok:false entry with a real reason,
     same "never invent, always say what actually happened" discipline as every scan result. Finishes by

@@ -83,11 +83,12 @@ takes effect as soon as the step Aegis is currently on finishes (never mid-comma
 before you type anything (Send stays disabled until the check comes back), and if anything is behind (e.g.
 "Semgrep 1.182.1 → 1.183.0 available"), it asks whether to update. Say yes (or "go ahead, upgrade" —
 any plain affirmative works, no fixed phrase) and it runs a real upgrade: a genuine `pip install --upgrade`
-for Bandit/Semgrep/pip-audit, or a fresh binary download for gitleaks/Trivy/ZAP, landing in the redteam
-container's writable `/tmp` so its own read-only root filesystem is never touched. It re-checks afterward
-and reports the real result — every tool updated cleanly, or (if one failed) exactly which ones are still
-on their old version and that it's proceeding anyway. This lasts for the container's current life only; it
-reverts on the next restart/recreate, and Aegis says so plainly rather than implying it's permanent.
+for Bandit/Semgrep/pip-audit, or a fresh binary download for gitleaks/Trivy/ZAP, written into the host-mounted
+`redteam_tool_updates/` folder (`install.sh` creates and owns it, same pattern as every other persistent folder
+this project uses) so its own read-only root filesystem is never touched. This is a real, permanent update — it
+survives a container restart or recreate, not just the current session, the same way a scan target's own fixes
+do. It re-checks afterward and reports the real result — every tool updated cleanly, or (if one failed) exactly
+which ones are still on their old version and that it's proceeding anyway.
 
 ## Benchmarks: why we chose Muse
 

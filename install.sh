@@ -16,7 +16,7 @@ cd "$(dirname "$0")"
 ENV_FILE=".env"
 [ -f "$ENV_FILE" ] || { echo "Copy .env.example to .env and fill it in first."; exit 1; }
 
-mkdir -p src/self self_target aegis_out dynamic_pristine dynamic_target
+mkdir -p src/self self_target aegis_out dynamic_pristine dynamic_target redteam_tool_updates
 # Self-scan target: Aegis scanning its OWN source, the same way. It moves through the same
 # pristine -> working-copy split a cloned repo does: src/self/ is the pristine copy (read-only to the sandbox at
 # /self_pristine), self_target/self/ is the working copy the sandbox fixes (at /self_target/self) and redteam
@@ -33,14 +33,17 @@ rsync -a --delete --exclude ".git" --exclude ".env" --exclude "__pycache__" --ex
 # different uid, so every fix, export and clone would fail with "Permission denied". A throwaway root container
 # from the sandbox image (no sudo needed) seeds the self working copy from the pristine copy and hands each dir to
 # the one container that writes it: self_target/, dynamic_target/ and aegis_out/ to the sandbox (1001),
-# dynamic_pristine/ to redteam (1000, it writes fresh clones there). Every other mount of these dirs is read-only.
-# It runs BEFORE redteam starts: redteam/server.py only registers "self" if /src_self/self already exists then.
+# dynamic_pristine/ and redteam_tool_updates/ to redteam (1000 -- it writes fresh clones AND live scanner-tool
+# updates there, see redteam/server.py's own "Live, same-session tool update" section). Every other mount of
+# these dirs is read-only. It runs BEFORE redteam starts: redteam/server.py only registers "self" if
+# /src_self/self already exists then.
 docker build -q -t aegis-sandbox:latest ./sandbox | tail -1
 docker run --rm --user 0 --network none --entrypoint sh \
   -v "$(pwd)/src/self:/self_pristine:ro" -v "$(pwd)/self_target:/self_target" -v "$(pwd)/aegis_out:/aegis_out" \
   -v "$(pwd)/dynamic_pristine:/dynamic_pristine" -v "$(pwd)/dynamic_target:/dynamic_target" \
+  -v "$(pwd)/redteam_tool_updates:/redteam_tool_updates" \
   aegis-sandbox:latest -c 'rm -rf /self_target/self && cp -a /self_pristine /self_target/self &&
-    chown -R 1001:1001 /self_target /dynamic_target /aegis_out && chown -R 1000:1000 /dynamic_pristine'
+    chown -R 1001:1001 /self_target /dynamic_target /aegis_out && chown -R 1000:1000 /dynamic_pristine /redteam_tool_updates'
 
 # --- redteam: static scanners + ZAP. On Linux this ran as --network host; Docker Desktop (Mac/Windows) does not
 # route --network host to localhost reliably (confirmed live), so this uses a dedicated bridge network
@@ -69,6 +72,7 @@ docker volume create aegis-redteam-trivy-cache >/dev/null
 docker run -d --name aegis-redteam --network aegis-net --read-only --tmpfs /tmp:size=2g,exec --restart unless-stopped \
   -v "$(pwd)/self_target:/src_self:ro" -v "$(pwd)/dynamic_pristine:/dynamic_pristine_rw" -v "$(pwd)/dynamic_target:/src_dynamic:ro" \
   -v "$(pwd)/images:/images:ro" -v aegis-redteam-trivy-cache:/trivy-cache \
+  -v "$(pwd)/redteam_tool_updates:/tool_updates" \
   -e REDTEAM_TOKEN="$REDTEAM_TOKEN" -e GITHUB_CLONE_TOKEN="$GITHUB_CLONE_TOKEN" aegis-redteam:latest >/dev/null
 
 # --- sandbox: the isolated code sandbox fixredteam/fixpentest write real fixes in (--network none) ---

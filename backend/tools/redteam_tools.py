@@ -377,9 +377,9 @@ async def check_scanner_versions(args: dict, ctx: dict) -> str:
         "current/latest values from this result exactly, never invent, round or recall them from memory."
         + ("" if not outdated else (
             " Since outdated_count is greater than 0, end your reply by asking plainly: would the operator like you "
-            "to update the outdated tool(s) now? Mention this updates them live for the rest of THIS session only "
-            "(it does not survive a container restart). Only call update_scanner_tools if they say yes -- never on "
-            "your own initiative, and never for a tool not in outdated_tools."
+            "to update the outdated tool(s) now? Mention this is a real, permanent update that survives a "
+            "container restart/recreate, not just this session. Only call update_scanner_tools if they say yes -- "
+            "never on your own initiative, and never for a tool not in outdated_tools."
         ))
     )
     return json.dumps(data)
@@ -387,9 +387,10 @@ async def check_scanner_versions(args: dict, ctx: dict) -> str:
 
 async def update_scanner_tools(args: dict, ctx: dict) -> str:
     """Actually upgrades the named tool(s), live, in the redteam container -- real pip installs / binary downloads
-    into its writable /tmp (see redteam/server.py's own module comment for why that's safe without touching its
-    read-only root), never a claim without a real action behind it. Only ever called after the operator said yes
-    to an update check_scanner_versions offered them."""
+    into its host-mounted /tool_updates (see redteam/server.py's own module comment for why that's safe without
+    touching its read-only root, AND why it's a real, permanent update, not a session-only one), never a claim
+    without a real action behind it. Only ever called after the operator said yes to an update
+    check_scanner_versions offered them."""
     why = _gate()
     if why:
         return why
