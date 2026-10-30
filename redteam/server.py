@@ -892,7 +892,12 @@ async def _update_pip_tool(name: str) -> dict:
                       "semgrep": (["semgrep", "--version"], r"([\d.]+)"),
                       "pip-audit": (["pip-audit", "--version"], r"pip-audit\s+([\d.]+)")}[name]
     from_version = await _live_cli_version(*version_check, "?")
-    code, out = _run(["pip", "install", "--user", "--upgrade", "--no-cache-dir", name], timeout=180)
+    # No --no-cache-dir (removed 2026-10-30, found live: a real semgrep update hit this call's own 180s timeout
+    # and never finished) -- it forced pip to re-download EVERY dependency from PyPI from scratch on every single
+    # update attempt, with nothing to fall back on if that happened to be slow. HOME=/tmp here (redteam/Dockerfile),
+    # so pip's default cache (~/.cache/pip) already lives on the container's own writable tmpfs -- letting pip use
+    # it costs nothing extra and makes a retry (or a different tool sharing a dependency) meaningfully faster.
+    code, out = _run(["pip", "install", "--user", "--upgrade", name], timeout=240)
     if code != 0:
         return {"name": name, "ok": False, "from": from_version, "to": None, "error": out[-400:]}
     to_version = await _live_cli_version(*version_check, "?")

@@ -398,7 +398,10 @@ async def update_scanner_tools(args: dict, ctx: dict) -> str:
     if not isinstance(tools, list) or not tools:
         return json.dumps({"ok": False, "error": "tools must be a non-empty list of real tool names from outdated_tools"})
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=5.0)) as c:   # a fresh pip install / binary download per tool, can genuinely take a while
+    # /update_tools processes tools ONE AT A TIME, not concurrently -- this must stay comfortably above the sum of
+    # every tool's own worst-case time (redteam/server.py's own pip-install timeout is 240s per tool), or this
+    # outer call times out first and masks the real per-tool error/result that endpoint would otherwise return.
+    async with httpx.AsyncClient(timeout=httpx.Timeout(60.0 + 240.0 * len(tools), connect=5.0)) as c:
         r = await c.post(f"{URL}/update_tools", json={"tools": tools}, headers={"Authorization": f"Bearer {TOKEN}"})
 
     if r.status_code != 200:

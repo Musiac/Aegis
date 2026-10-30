@@ -194,6 +194,14 @@ button {
 }
 button:disabled { opacity: 0.5; cursor: default; }
 
+/* Send stays CLICKABLE while busy (2026-10-30) -- a message typed then is read server-side as a possible
+   "stop"/"pause" interrupt, see web.py's ws_endpoint -- but it must look unmistakably different from its
+   idle state, or an operator can type a brand new unrelated request without realizing Aegis is still working
+   on the last one and get an unexpected "still working" rejection (found live, real operator confusion). */
+#send.busy { background: #e2a33d; color: #1a1300; }
+#input.busy { border-color: #e2a33d; }
+#input.busy::placeholder { color: #c98a1f; opacity: 0.9; }
+
 /* Push-to-talk mic: a plain round button, red + pulsing while actually recording so it reads at a glance as
    "live", same room as the Send button rather than its own row. */
 #mic-btn {

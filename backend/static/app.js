@@ -7,6 +7,7 @@
   const form = document.getElementById("composer");
   const input = document.getElementById("input");
   const sendBtn = document.getElementById("send");
+  const DEFAULT_PLACEHOLDER = input.placeholder;
   const taskDots = document.getElementById("task-dots");
   const downloadTerminalBtn = document.getElementById("download-terminal");
   const micBtn = document.getElementById("mic-btn");
@@ -230,8 +231,15 @@
     // message sent while busy is read by the server as a possible "stop"/"pause" interrupt (see web.py's
     // ws_endpoint), so disabling Send here would make those words impossible to actually deliver mid-task. The
     // submit handler below still shows the normal pending-dots UI only when nothing was already in flight.
+    // Send/input get an unmistakably different LOOK while busy instead (2026-10-30, real operator confusion
+    // otherwise): an unchanged "Send" button made someone assume a quick reply meant the whole task was done,
+    // type a brand new unrelated request, and get an unexpected "still working" rejection back.
     isBusy = busy;
     sendBtn.disabled = !museConfigured;
+    sendBtn.textContent = busy ? "Working…" : "Send";
+    sendBtn.classList.toggle("busy", busy);
+    input.classList.toggle("busy", busy);
+    input.placeholder = busy ? 'Aegis is working -- type "pause" or "stop" to interrupt' : DEFAULT_PLACEHOLDER;
     // Dots in two places at once, per the owner: a pill next to Send (at-a-glance, before even looking at the
     // chat pane) AND inline next to "Aegis" in the chat turn (showPendingDots/clearPendingDots below).
     taskDots.style.display = busy ? "inline-flex" : "none";
