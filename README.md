@@ -79,8 +79,9 @@ it redoes the same task from scratch, after a pause it picks up exactly where it
 clones, no repeated scans). These are read mid-task, not just between tasks: say it any time, and it
 takes effect as soon as the step Aegis is currently on finishes (never mid-command).
 
-**Aegis can update its own scanner tools** — ask it to check scanner versions, and if anything is behind
-(e.g. "Semgrep 1.182.1 → 1.183.0 available"), it asks whether to update. Say yes (or "go ahead, upgrade" —
+**Aegis can update its own scanner tools** — it checks scanner recency once automatically, on your first
+real request of a session (no need to ask), and if anything is behind (e.g. "Semgrep 1.182.1 → 1.183.0
+available"), it asks whether to update before moving on to your actual request. Say yes (or "go ahead, upgrade" —
 any plain affirmative works, no fixed phrase) and it runs a real upgrade: a genuine `pip install --upgrade`
 for Bandit/Semgrep/pip-audit, or a fresh binary download for gitleaks/Trivy/ZAP, landing in the redteam
 container's writable `/tmp` so its own read-only root filesystem is never touched. It re-checks afterward
