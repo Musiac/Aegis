@@ -658,10 +658,18 @@ async def ws_endpoint(ws: WebSocket):
             control_state = ctx.get("_control_state")
             if control == "resume" and control_state == "paused":
                 # Resume a pause: `messages` already holds every round/tool-result made before the pause, in a
-                # valid, completable state (see core.run_turn's control check) -- a short nudge, not the operator's
-                # literal "continue"/"start" text, keeps the model from treating this as a brand new request.
+                # valid, completable state (see core.run_turn's control check). The guidance goes in a SYSTEM
+                # message, not the user one -- core.run_turn's fix_task detection reads ONLY the latest role=="user"
+                # message's text (see its own _FIX_WORDS/continuation-regex check), and a bracketed "[resumed after
+                # a pause] Continue..." user message used to fail that regex's fullmatch, silently resetting
+                # ctx["fix_task"] to False on every resume -- found live 2026-10-30: a paused fix job resumed,
+                # finished its scans, then ended the turn with no edit_file calls and no structural nudge to catch
+                # it, because the fix-task deliverable-gap guard had been quietly turned off for that turn. A plain
+                # "continue" user message matches the SAME exemption a real operator's own "continue" already does,
+                # so fix_task correctly carries over from the paused turn instead.
                 ctx.pop("_control_state", None)
-                messages.append({"role": "user", "content": "[resumed after a pause] Continue exactly where you left off -- do not restart or repeat already-finished steps."})
+                messages.append({"role": "system", "content": "The operator just said \"continue\" after a pause -- pick up exactly where you left off, do not restart or repeat already-finished steps."})
+                messages.append({"role": "user", "content": "continue"})
             elif control == "resume" and control_state == "stopped":
                 # Resume a stop: there is nothing left to continue (the stopped turn's own messages were already
                 # erased in _run_and_finish), so "start"/"continue" here means redo the SAME task from scratch.
