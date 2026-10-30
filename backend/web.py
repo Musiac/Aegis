@@ -670,19 +670,13 @@ async def ws_endpoint(ws: WebSocket):
 
 
 async def _run_greeting(ws, messages, ctx, on_text, on_tool_call, _total_cost_usd) -> None:
-    try:
-        provider = pick_provider("", user_text="hello")  # Use default provider for greeting
-        await ws.send_text(json.dumps({"type": "terminal", "line": f"provider: {provider}"}))
-        _maybe_announce_muse_billing(messages, ctx, provider)
-        messages.append({"role": "user", "content": "Hi"})  # Minimal trigger to start the greeting
-        ctx["greeting"] = True      # the greeting is not a user task: no "Completed task in" line
-        try:
-            await run_turn(provider, messages, ctx, on_text, on_tool_call)
-        finally:
-            ctx["greeting"] = False
-        await ws.send_text(json.dumps({"type": "cost", "total_usd": _total_cost_usd()}))
-        await ws.send_text(json.dumps({"type": "done"}))
-    except Exception as e:
-        print(f"[ws] greeting raised {type(e).__name__}: {e}", flush=True)
-        await ws.send_text(json.dumps({"type": "error", "text": f"Greeting failed: {e}"}))
-        await ws.send_text(json.dumps({"type": "done"}))
+    """A fixed, code-written line -- no LLM round at all (shortened 2026-10-30, owner's own instruction: the old
+    version ran check_scanner_versions + verify_sandbox_safety automatically on every connect and narrated both in
+    full before the operator could say anything, which read as slow and over-long for a first hello). Those two
+    tools are still real and still callable on request (system_prompt.py's own note covers that); they are simply
+    no longer run unprompted at startup. _maybe_announce_muse_billing's disclosure still happens -- just naturally,
+    on the operator's first real task (see its call site in the main receive loop below), since there is no longer
+    an LLM round here for it to attach to."""
+    await on_text("Hi, I am Aegis. How can I help you?")
+    await ws.send_text(json.dumps({"type": "cost", "total_usd": _total_cost_usd()}))
+    await ws.send_text(json.dumps({"type": "done"}))
