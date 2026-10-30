@@ -38,6 +38,7 @@ from .llm import available_providers, scan_fix_providers
 from .model_pricing import compute_asr_cost_usd, compute_gemini_tts_cost_usd
 from .tools.redteam_tools import check_scanner_versions, cleanup_redteam_scratch
 from .tools.sandbox_tools import cleanup_sandbox_scratch
+from .tools.sandbox_verify import verify_sandbox_safety
 
 # muse-voice-transcribe-1.0's real cost isn't an LLM-token call, so it can't go through compute_cost_usd/session_cost_usd
 # the way core.run_turn's rounds do -- it's billed per second of audio, attributed to a push-to-talk utterance that
@@ -726,5 +727,33 @@ async def _run_greeting(ws, messages, ctx, on_text, on_tool_call, _total_cost_us
             messages.append({"role": "assistant", "content": report})
     except Exception as e:                                                       # noqa: BLE001 -- a bad scanner-version check must never block the session from opening
         await ws.send_text(json.dumps({"type": "error", "text": f"Scanner version check failed: {type(e).__name__}: {e}"}))
+    try:
+        # Also automatic (restored 2026-10-30, owner's own instruction -- the operator expected this to still
+        # run at connect, same as before the greeting was shortened): a direct function call, same as
+        # check_scanner_versions above, not an LLM round -- verify_sandbox_safety's own emit_status calls
+        # already narrate each of its 3 checks simply in the chat pane as they run (see sandbox_verify.py); this
+        # just adds the one-line summary afterward, parsed directly from each check's own real, fixed-format
+        # output (never LLM-interpreted, so there is nothing for a model to invent or soften here).
+        vresult = await verify_sandbox_safety({}, ctx)
+        await on_tool_call("verify_sandbox_safety", {}, vresult)
+        parsed = json.loads(vresult)
+        by_check = {r.get("check"): (r.get("raw") or {}) for r in parsed.get("results", [])}
+        lines = []
+        w = by_check.get("write_outside_sandbox", {})
+        w_out = (w.get("stdout") or "") + (w.get("stderr") or "")
+        lines.append("- ✅ Can't write outside the sandbox (blocked: read-only)" if w_out.count("Read-only file system") >= 2
+                     else f"- ❓ Write-outside-sandbox check: unexpected output ({w_out[:120]!r})")
+        n = by_check.get("external_network", {})
+        n_out = n.get("stdout") or ""
+        m = re.search(r"exit_code=(\d+)", n_out)
+        lines.append("- ✅ Can't reach the internet (blocked: no network device)" if m and m.group(1) != "0"
+                     else f"- ❓ External-network check: unexpected output ({n_out[:120]!r})")
+        c = by_check.get("resource_caps", {})
+        c_out = c.get("stdout") or ""
+        caps = ", ".join(re.findall(r"(memory\.max=\S+|pids\.max=\S+|cpu\.max=\S+)", c_out)) or "unavailable"
+        lines.append(f"- ✅ Resource limits enforced: {caps}")
+        await on_text("Sandbox isolation verified with 3 live checks:\n\n" + "\n".join(lines))
+    except Exception as e:                                                       # noqa: BLE001 -- a bad sandbox check must never block the session from opening
+        await ws.send_text(json.dumps({"type": "error", "text": f"Sandbox safety check failed: {type(e).__name__}: {e}"}))
     await ws.send_text(json.dumps({"type": "cost", "total_usd": _total_cost_usd()}))
     await ws.send_text(json.dumps({"type": "done"}))
