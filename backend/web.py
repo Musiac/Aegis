@@ -638,6 +638,13 @@ async def ws_endpoint(ws: WebSocket):
                 continue
             if "provider" in msg:                      # the dropdown can change between tasks: honour the latest choice
                 dropdown_choice = str(msg.get("provider", "")).strip()
+                # Real bug found live 2026-10-30: app.js sends the SELECTED OPTION's value, which since the muse_variants dropdown
+                # replaced the old flat provider list IS a variant id ("spark-contributor"/"spark"/"wonder"), never the literal
+                # string "muse" -- pick_provider() only knows the provider names in PROVIDERS (just "muse" here), so a variant id
+                # reached it unchanged and raised "'spark-contributor' is not configured on this host". Normalize any known variant
+                # id straight to "muse" here; the variant ITSELF is still honoured correctly below via ctx["muse_variant"].
+                if dropdown_choice in {v["id"] for v in MUSE_VARIANTS}:
+                    dropdown_choice = "muse"
             # muse_variant (added 2026-10-30): the real model-picker dropdown's choice, persisted across turns in ctx like
             # dropdown_choice -- "spark-contributor"/"spark"/"wonder" (see MUSE_VARIANTS). Falls back to the safe default so an older
             # client (or a driver script naming no variant) behaves exactly as before. "model"/"effort" are still accepted directly too
