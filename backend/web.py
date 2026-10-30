@@ -532,7 +532,17 @@ async def ws_endpoint(ws: WebSocket):
         """A short transient 'now doing X' line for the chat pane (empty text clears it). Never stored as a chat message."""
         await _send({"type": "status", "text": text})
 
-    ctx = {"emit_status": emit_status, "emit_terminal_progress": emit_terminal_progress, "emit_document": emit_document, "sid": uuid.uuid4().hex[:6]}
+    async def emit_warn(text: str) -> None:
+        """A real {"type":"warn"} message (shown in red, see .msg.warn in style.css), sent DIRECTLY from inside a tool call
+        (added 2026-10-30) -- not relayed through the model's own chat text. Real incident this fixes: the contributor+private
+        refusal tool told the model to recite the warning verbatim in ITS OWN reply, which goes out as a plain {"type":"chat"}
+        message and is NOT styled red -- the operator only ever saw the real red warning on the SECOND attempt (the one
+        triggered by web.py's confirm gate), and had to type "no" twice before anything actually stopped, because the first
+        "no" was consumed as the message that re-triggered the gate rather than as an answer to anything yet shown in red."""
+        await _send({"type": "warn", "text": text})
+
+    ctx = {"emit_status": emit_status, "emit_terminal_progress": emit_terminal_progress, "emit_document": emit_document,
+           "emit_warn": emit_warn, "sid": uuid.uuid4().hex[:6]}
     # Lets core.py's per-task cost line include ASR/TTS spend (tracked here, module-level, keyed by sid) without
     # core.py importing web.py (circular) -- see core.py's _task_cost().
     ctx["_asr_tts_cost_fn"] = lambda: _asr_cost_by_sid.get(ctx["sid"], 0.0) + _gemini_tts_cost_by_sid.get(ctx["sid"], 0.0)
@@ -692,29 +702,31 @@ async def ws_endpoint(ws: WebSocket):
             # Contributor + a CONFIRMED-private repo is a real "your data may train Meta's models" exposure the operator must actively
             # accept, not something that happens because contributor is simply the default (added 2026-10-30, the owner's own request).
             # Gated here, before run_turn ever starts, not mid-turn. Two ways this fires:
-            #   - ctx["_pending_private_clone_warning"]: the EARLY path (added 2026-10-30) -- redteam_clone_private_repo itself
-            #     refused to clone THIS round (see its own comment) the moment the model tried it, before any private code ever
-            #     left the operator's control, and the model relayed the warning in chat already. This confirm cycle is what
-            #     actually unblocks the NEXT attempt.
-            #   - ctx["repo_visibility"] == "private": the fallback path -- visibility only became known mid-turn some other way
-            #     (e.g. scanning "self"), so core.run_turn's own fail-closed check already downgraded that turn off Contributor
-            #     automatically (and narrated why); this just makes sure the NEXT turn's dropdown choice is confirmed too.
+            #   - ctx["_pending_private_clone_warning"]: the EARLY path -- redteam_clone_private_repo itself refused to clone and sent
+            #     the red warning LIVE, directly, the moment the model tried it (see its own emit_warn call), before any private code
+            #     ever left the operator's control. The warning was ALREADY shown; this message IS the answer -- no need to show it
+            #     again or wait for yet another one (a real incident, 2026-10-30: the operator had to type "no" TWICE, because the
+            #     first "no" was being consumed just to re-trigger a second warning display rather than being read as an answer).
+            #   - ctx["repo_visibility"] == "private" with the pending flag NOT set: the fallback path -- visibility only became known
+            #     mid-turn some other way (e.g. scanning "self"), so core.run_turn's fail-closed check already downgraded that turn
+            #     off Contributor automatically (and narrated why) -- but the operator was never actually asked a yes/no question for
+            #     THIS confirm cycle yet, so show the warning now and treat their NEXT message as the answer.
             # Only reached once we know NO turn is currently busy (see above) -- never ask this mid-task.
             if variant.get("contributor") and not ctx.get("_contributor_private_ok") and (
                     ctx.get("_pending_private_clone_warning") or ctx.get("repo_visibility") == "private"):
-                await _send({"type": "warn", "text": "WARNING: You have chosen the Contributor (cheapest) model for this private repo "
-                                                       "task. Your data may be used for Meta's training. Should I go ahead?"})
-                try:
-                    raw2 = await asyncio.wait_for(ws.receive_text(), timeout=120.0)
-                    confirm_msg = json.loads(raw2)
-                except (asyncio.TimeoutError, ValueError):
-                    confirm_msg = {}
-                # Accept a plain typed reply too, not just the native confirm() popup's structured confirm_response
-                # (real bug found live 2026-10-30, same incident as above: the warning text reads like an ordinary
-                # chat question ("Should I go ahead?"), so an operator typing "no"/"yes" into the chat box -- a
-                # completely reasonable reaction to reading it -- sent a plain {"type":"user_message"} that this
-                # code did not recognize as an answer at all, leaving the warning's real resolution entirely up to
-                # a silent browser popup the operator may never have consciously engaged with).
+                if ctx.get("_pending_private_clone_warning"):
+                    confirm_msg = msg   # already shown live by the tool -- THIS message is the answer, don't ask again
+                else:
+                    await _send({"type": "warn", "text": "WARNING: You have chosen the Contributor (cheapest) model for this private "
+                                                           "repo task. Your data may be used for Meta's training. Should I go ahead?"})
+                    try:
+                        raw2 = await asyncio.wait_for(ws.receive_text(), timeout=120.0)
+                        confirm_msg = json.loads(raw2)
+                    except (asyncio.TimeoutError, ValueError):
+                        confirm_msg = {}
+                # Accept a plain typed reply too, not just the native confirm() popup's structured confirm_response (the popup
+                # itself was removed 2026-10-30 -- the warning text reads like an ordinary chat question, so a typed reply is the
+                # one and only way to answer it now).
                 if confirm_msg.get("type") == "confirm_response":
                     confirmed = bool(confirm_msg.get("confirm"))
                 elif confirm_msg.get("type") == "user_message":
@@ -727,6 +739,11 @@ async def ws_endpoint(ws: WebSocket):
                     continue
                 ctx["_contributor_private_ok"] = True   # sticky for the rest of THIS session once accepted -- never re-ask every turn
                 ctx.pop("_pending_private_clone_warning", None)
+                # `text` right now is just the operator's yes/confirm reply, not a real task -- never let that fall through to
+                # run_turn as this turn's request. Ask them to resend instead of guessing/auto-replaying a possibly-stale task.
+                await _send({"type": "chat", "text": "Confirmed. Resend your request to run it now."})
+                await _send({"type": "done"})
+                continue
 
             try:
                 # Re-picked every turn, not cached: if the operator left the dropdown on "auto" (dropdown_choice=="")

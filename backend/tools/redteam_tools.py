@@ -324,12 +324,17 @@ async def redteam_clone_private_repo(args: dict, ctx: dict) -> str:
     # all -- redteam_clone_repo itself never clones a private repo (it just detects one and asks for a token file).
     if ctx.get("force_model_override") == "muse-spark-1.3-contributor" and not ctx.get("_contributor_private_ok"):
         ctx["_pending_private_clone_warning"] = True
+        # Sent directly as a real {"type":"warn"} message (red), not relayed through the model's own chat text (fixed
+        # 2026-10-30, a real incident: the model reciting this itself goes out as plain chat, not styled, so the operator
+        # only ever saw the real red warning -- and a working confirm gate -- on a SECOND attempt).
+        emit_warn = ctx.get("emit_warn")
+        if emit_warn:
+            await emit_warn("WARNING: You have chosen the Contributor (cheapest) model for this private repo task. Your data "
+                             "may be used for Meta's training. Should I go ahead?")
         return json.dumps({"ok": False, "error": "Do not clone this yet.",
-                            "note": "STOP here -- do not call redteam_clone_private_repo or any other tool this round. Tell the "
-                                    "operator, verbatim: \"WARNING: You have chosen the Contributor (cheapest) model for this "
-                                    "private repo task. Your data may be used for Meta's training. Should I go ahead?\" Then end "
-                                    "your turn and wait for their answer -- they will either confirm, or switch the model dropdown "
-                                    "to Standard/Wonder and resend the request."})
+                            "note": "STOP here -- do not call redteam_clone_private_repo or any other tool this round. The "
+                                    "operator has already been shown the warning directly (in red) -- just say in ONE short "
+                                    "sentence that you're waiting for their answer, then end your turn."})
     await narrate(ctx, f"Now cloning {url} (private repo).")
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(130.0, connect=5.0)) as c:
