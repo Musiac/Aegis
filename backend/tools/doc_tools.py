@@ -11,6 +11,7 @@ import re
 from datetime import datetime, timezone
 
 from .. import turnlog
+from .narration import narrate
 
 _MAX_BODY_CHARS = 200_000
 
@@ -116,9 +117,11 @@ async def flush_pending_doc(ctx: dict, elapsed_s: float, cost_usd: float, provid
     res = await _deliver(pd["title"], body, ctx)
     if '"created": true' not in res:
         turnlog.log("doc_flush_failed", sid=ctx.get("sid"), result=turnlog.scrub(res, 160))
+    await narrate(ctx, f"Total time: {secs // 60} min {secs % 60} sec. Total cost: ${cost_usd:.3f}" + (f" ({provider})." if provider else "."))
 
 
 async def _deliver(title: str, body: str, ctx: dict) -> str:
+    await narrate(ctx, "Now creating the Word document summarizing the complete process.")
     data = _build_docx(title, _real_date_line(body, ctx))
     if len(data) > 8 * 1024 * 1024:
         return json.dumps({"created": False, "error": "The document came out too large to send (over 8 MB). Ask for a shorter report."})
@@ -139,7 +142,9 @@ async def _deliver(title: str, body: str, ctx: dict) -> str:
     if last_export.get("path"):
         from .sandbox_tools import append_doc_to_export
         try:
-            await append_doc_to_export(str(last_export["path"]), filename, doc_b64)
+            append_result = await append_doc_to_export(str(last_export["path"]), filename, doc_b64)
+            if append_result.get("ok"):
+                await narrate(ctx, f"Word document added to the zip file at {last_export['path']}, alongside the fixed repo and CHANGES.txt.")
         except Exception:                                                        # noqa: BLE001
             pass
     from .sandbox_web_tools import ensure_stopped_after_report

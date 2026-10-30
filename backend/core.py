@@ -209,9 +209,12 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
         (measured here by code, never by the model), so the report footer and the chat line always match."""
         await on_tool_call("get_current_datetime", {}, get_current_datetime())
         elapsed, task_cost = time.monotonic() - wall0, _task_cost()
+        had_pending_doc = bool(ctx.get("pending_doc"))
         await flush_pending_doc(ctx, elapsed, task_cost, provider)
         block = deliverables_block(ctx)
         text = (text.rstrip() + ("\n\n" + block if block else "")) if block else text
+        if not had_pending_doc and ctx.get("emit_terminal_progress"):   # flush_pending_doc already narrates totals when there WAS a pending doc
+            await ctx["emit_terminal_progress"]("aegis", f"Total time: {_fmt_elapsed(elapsed)}. Total cost: ${task_cost:.3f} ({provider}).")
         return text.rstrip() + f"\n\n**Completed task in:** {_fmt_elapsed(elapsed)}. **Total cost:** ${task_cost:.3f}, **Model:** {provider}"
     try:
         for _round_no in range(MAX_ROUNDS):

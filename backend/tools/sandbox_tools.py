@@ -12,6 +12,8 @@ import os
 import re
 import socket
 
+from .narration import narrate
+
 _SOCK = os.getenv("AEGIS_SANDBOX_SOCK", "/sock/exec.sock")
 
 
@@ -135,6 +137,7 @@ def _real_changes(project: str, zip_path: str) -> str:
 async def export_project(args: dict, ctx: dict) -> str:
     """Zips a finished project folder from /REPL/work into /aegis_out on the host -- the only way anything leaves the sandbox."""
     project = str(args.get("project") or "")
+    await narrate(ctx, "Now creating the diff file and storing CHANGES.txt.")
     if re.fullmatch(r"[A-Za-z0-9._-]{1,100}", project):
         # The fixed working copy is copied into /REPL/work by code (a fixed command that only differs by name): leaving it to the model cost a whole
         # round (33 s in a real run) right before every export. A name that is not a working copy (already placed in /REPL/work by hand) is left as it is.
@@ -154,6 +157,11 @@ async def export_project(args: dict, ctx: dict) -> str:
         ctx["last_export"] = {"filename": str(result.get("filename") or ""), "path": str(result.get("path") or ""),
                               "turn": ctx.get("turn_no"), "has_changes": bool(line),
                               "files": int(m.group(1)) if m else None, "plus": int(m.group(2)) if m else None, "minus": int(m.group(3)) if m else None}
+        await narrate(ctx, f"Created {result.get('filename')}, containing the fixed project and CHANGES.txt. Copied to {result['path']} on the host.")
+    elif result.get("ok"):
+        await narrate(ctx, f"Created {result.get('filename', 'the export zip')}, copied to {result.get('path', 'the host')}.")
+    else:
+        await narrate(ctx, f"Export failed: {result.get('error', 'unknown error')}.")
     return json.dumps(result)
 
 
@@ -250,6 +258,11 @@ async def edit_file(args: dict, ctx: dict) -> str:
     edits = args.get("edits")
     if not isinstance(edits, list) or not edits:
         edits = [{"path": args.get("path"), "old_text": args.get("old_text"), "new_text": args.get("new_text"), "replace_all": args.get("replace_all")}]
+    if not ctx.get("_fix_narrated_this_turn"):
+        # Narrated once per turn, not once per edit_file call -- a real fix run calls this many times in a row for one scan's worth of
+        # findings, and repeating "now fixing" before every single one would flood the terminal pane with noise instead of signal.
+        ctx["_fix_narrated_this_turn"] = True
+        await narrate(ctx, "Now fixing the results obtained from the scan.")
     results = []
     for i, e in enumerate(edits[:20], start=1):
         e = e if isinstance(e, dict) else {}

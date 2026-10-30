@@ -9,6 +9,8 @@ from collections import Counter
 
 import httpx
 
+from .narration import narrate
+
 URL = os.environ.get("AEGIS_REDTEAM_URL", "http://127.0.0.1:7906")
 TOKEN = os.environ.get("REDTEAM_TOKEN", "")   # written into .env by install.sh, read by both this process and the redteam container itself
 
@@ -145,28 +147,47 @@ def _with_populate(result_text: str, ctx: dict = None, force: bool = False) -> s
     return result_text
 
 
+async def _narrated_scan(tool: str, ctx: dict, target: str) -> str:
+    """Shared body for every static scanner tool (added 2026-10-30): narrates the phase to the terminal pane before/after the real
+    call, from the scanner's own result -- never the model's own words."""
+    why = _gate()
+    if why:
+        return why
+    await narrate(ctx, f"Now running the {tool} static scan on {target or 'the local clone'}.")
+    data = _finish(tool, await _call(tool, target), ctx)
+    ctx.pop("_fix_narrated_this_turn", None)   # a fresh result set to fix -- let "now fixing" announce again for it
+    if data.get("ok"):
+        summ = data.get("summary") or {}
+        await narrate(ctx, f"Static scan ({tool}) results for {target or 'the local clone'}: {summ.get('tally_sentence', str(data.get('count', '?')) + ' total')}.")
+        if data.get("count") == 0:
+            await narrate(ctx, f"No {tool} findings to fix.")
+    else:
+        await narrate(ctx, f"Static scan ({tool}) on {target or 'the local clone'} failed: {data.get('error', 'unknown error')}.")
+    return json.dumps(data)
+
+
 async def redteam_gitleaks(args: dict, ctx: dict) -> str:
-    return _gate() or json.dumps(_finish("gitleaks", await _call("gitleaks", str(args.get("target") or "")), ctx))
+    return await _narrated_scan("gitleaks", ctx, str(args.get("target") or ""))
 
 
 async def redteam_bandit(args: dict, ctx: dict) -> str:
-    return _gate() or json.dumps(_finish("bandit", await _call("bandit", str(args.get("target") or "")), ctx))
+    return await _narrated_scan("bandit", ctx, str(args.get("target") or ""))
 
 
 async def redteam_semgrep(args: dict, ctx: dict) -> str:
-    return _gate() or json.dumps(_finish("semgrep", await _call("semgrep", str(args.get("target") or "")), ctx))
+    return await _narrated_scan("semgrep", ctx, str(args.get("target") or ""))
 
 
 async def redteam_pip_audit(args: dict, ctx: dict) -> str:
-    return _gate() or json.dumps(_finish("pip_audit", await _call("pip_audit", str(args.get("target") or "")), ctx))
+    return await _narrated_scan("pip_audit", ctx, str(args.get("target") or ""))
 
 
 async def redteam_npm_audit(args: dict, ctx: dict) -> str:
-    return _gate() or json.dumps(_finish("npm_audit", await _call("npm_audit", str(args.get("target") or "")), ctx))
+    return await _narrated_scan("npm_audit", ctx, str(args.get("target") or ""))
 
 
 async def redteam_trivy(args: dict, ctx: dict) -> str:
-    return _gate() or json.dumps(_finish("trivy", await _call("trivy", str(args.get("target") or "")), ctx))
+    return await _narrated_scan("trivy", ctx, str(args.get("target") or ""))
 
 
 async def redteam_check_repo_size(args: dict, ctx: dict) -> str:
@@ -215,6 +236,7 @@ async def redteam_clone_repo(args: dict, ctx: dict) -> str:
     url = str(args.get("url") or "").strip()
     if not url:
         return json.dumps({"ok": False, "error": "Say which repo URL to clone."})
+    await narrate(ctx, f"Now cloning {url}.")
 
     # First, check if repo is accessible
     async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=5.0)) as c:
@@ -295,6 +317,7 @@ async def redteam_clone_private_repo(args: dict, ctx: dict) -> str:
         return json.dumps({"ok": False, "error": "Provide the repository URL"})
     if not token_file:
         return json.dumps({"ok": False, "error": "Provide the path to the token file"})
+    await narrate(ctx, f"Now cloning {url} (private repo).")
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(130.0, connect=5.0)) as c:
         r = await c.post(f"{URL}/clone_with_token",
@@ -343,7 +366,18 @@ async def pentest_zap(args: dict, ctx: dict) -> str:
     why = _gate()
     if why:
         return why
-    return json.dumps(_finish("zap", await _call_zap_streaming(str(args.get("target_url") or ""), ctx.get("emit_terminal_progress")), ctx))
+    target_url = str(args.get("target_url") or "")
+    await narrate(ctx, f"Now running the active pentest (ZAP spider, passive scan, and active attacking scan) on {target_url or 'the server'}.")
+    data = _finish("zap", await _call_zap_streaming(target_url, ctx.get("emit_terminal_progress")), ctx)
+    ctx.pop("_fix_narrated_this_turn", None)   # a fresh result set to fix -- let "now fixing" announce again for it
+    if data.get("ok"):
+        summ = data.get("summary") or {}
+        await narrate(ctx, f"Active pentest results for {target_url or 'the server'}: {summ.get('tally_sentence', str(data.get('count', '?')) + ' total')}.")
+        if data.get("count") == 0:
+            await narrate(ctx, "All issues from the passive and active scans have been fixed.")
+    else:
+        await narrate(ctx, f"Active pentest on {target_url or 'the server'} did not complete: {data.get('error', 'unknown error')}.")
+    return json.dumps(data)
 
 
 async def _call_lateral_movement_streaming(target_url: str, session_cookie: str, emit) -> dict:

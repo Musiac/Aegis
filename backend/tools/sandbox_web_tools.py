@@ -9,6 +9,8 @@ import json
 
 import httpx
 
+from .narration import narrate
+
 CONTROL_URL = "http://aegis-sandbox-web:7999"
 APP_HOST = "www.sandbox.com"
 APP_PORT = 8900
@@ -64,8 +66,17 @@ async def sandbox_app_start(args: dict, ctx: dict) -> str:
     if not project:
         return json.dumps({"ok": False, "error": "Say which project to start (the clone's name, or \"self\")."})
     install = args.get("install")
-    result = _note(await _call("/start", {"project": project, "cmd": str(args.get("cmd") or ""),
-                                           "install": True if install is None else bool(install)}), "start")
+    do_install = True if install is None else bool(install)
+    await narrate(ctx, f"Now checking whether {project} has a server component.")
+    if do_install:
+        await narrate(ctx, f"Yes -- {project} has a server component. Now installing the dependencies it declares.")
+    await narrate(ctx, f"Now starting {project}'s server in the locked sandbox.")
+    result = _note(await _call("/start", {"project": project, "cmd": str(args.get("cmd") or ""), "install": do_install}), "start")
+    if result.get("ok"):
+        await narrate(ctx, f"{project}'s server is up. If it calls the OpenAI API, the simulated OpenAI API server already running in "
+                           f"the locked sandbox (http://{APP_HOST}:{STUB_PORT}/v1) will answer it.")
+    else:
+        await narrate(ctx, f"No server component could be started for {project}: {result.get('error', 'unknown error')}.")
     _mark_running(ctx, project, bool(result.get("ok")))
     return json.dumps(result)
 
@@ -77,8 +88,11 @@ async def sandbox_app_restart(args: dict, ctx: dict) -> str:
     if not project:
         return json.dumps({"ok": False, "error": "Say which project to restart (the clone's name, or \"self\")."})
     install = args.get("install")
+    await narrate(ctx, f"Now restarting {project}'s server in the locked sandbox with the fix applied.")
     result = _note(await _call("/restart", {"project": project, "cmd": str(args.get("cmd") or ""),
                                              "install": True if install is None else bool(install)}), "restart")
+    if not result.get("ok"):
+        await narrate(ctx, f"{project}'s server could not be restarted: {result.get('error', 'unknown error')}.")
     _mark_running(ctx, project, bool(result.get("ok")))
     return json.dumps(result)
 
@@ -88,6 +102,7 @@ async def sandbox_app_stop(args: dict, ctx: dict) -> str:
     in code, the moment the report is actually created, whether or not you call this yourself. Call it directly only if you want it stopped
     sooner than that (e.g. the operator asked you not to fix anything after all)."""
     ctx["sandbox_app_running"] = False
+    await narrate(ctx, "Now stopping the sandbox environment.")
     return json.dumps(await _call("/stop", {}))     # {} (not None) so _call POSTs -- control.py only serves /stop under POST
 
 
@@ -99,6 +114,7 @@ async def ensure_stopped_after_report(ctx: dict) -> str:
         return ""
     project = ctx.get("sandbox_app_project") or ""
     ctx["sandbox_app_running"] = False
+    await narrate(ctx, "Now stopping the sandbox environment.")
     result = await _call("/stop", {})
     return (f"The temporary sandbox server ({project}, http://{APP_HOST}:{APP_PORT}/) has been stopped."
             if result.get("ok") else f"Tried to stop the temporary sandbox server ({project}) but it answered: {result.get('error', result)}")
