@@ -300,12 +300,12 @@ These twelve are the questions shown in the UI. Edit the placeholders (`OWNER/RE
 4. `check the dependencies of https://github.com/usestrix/strix for known CVEs (pip-audit and npm audit).`
 5. `look for hardcoded secrets and leaked API keys in https://github.com/usestrix/strix.`
 6. `check the versions of all your scanner tools and tell me which ones need an update.`
-7. `scan the private repo https://github.com/OWNER/REPO (my token is in /secrets/github_token.txt) and fix any issue you find.`
+7. `scan the private repo https://github.com/OWNER/REPO (my token is in FILEPATH_WITH_GITHUB_API) and fix any issue you find.`
 8. `scan self with every scanner, fix everything you can, and give me a Word report of what you changed.`
 
 **Active testing**
 
-9. `go to the private repo https://github.com/OWNER/REPO (token file: /secrets/github_token.txt), load it locally and run redteam and if it has a server like gradio or fastapi then stand up the server and run pentest tests, and fix the issues found in these tests.`
+9. `go to the private repo https://github.com/OWNER/REPO (token file: FILEPATH_WITH_GITHUB_API), load it locally and run redteam and if it has a server like gradio or fastapi then stand up the server and run pentest tests, and fix the issues found in these tests.`
 10. `pentest http://localhost:8080/ with ZAP, and if you get in, fix the vulnerability and prove it is closed.`
 11. `do a liveness and technology check on https://example.com (a site I do not own; I will type PENTESTLIVE to confirm).`
 
