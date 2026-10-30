@@ -370,27 +370,38 @@
 
   downloadTerminalBtn.addEventListener("click", downloadTerminalLog);
 
-  // Example questions: page 1 = items 1-6, page 2 = items 7-12. Shown shortened; clicking one puts the FULL
-  // text in the chat box (not sent) so it can be edited first. They cover everything she can do: static scan,
-  // scan + fix, secrets, dependency CVEs, private repos, Word reports, active ZAP pentest, pentest + fix,
-  // the cautious third-party liveness probe (PENTESTLIVE), and the scanner-version check.
+  // Example questions, paged 6 at a time (nav cycles through all pages, not just 2 -- added 2026-10-30 when a
+  // 3rd page of README run-matrix repos was added). Shown shortened; clicking one puts the FULL text in the
+  // chat box (not sent) so it can be edited first. They cover everything she can do: static scan, scan + fix,
+  // secrets, dependency CVEs, private repos, Word reports, active ZAP pentest, pentest + fix, the cautious
+  // third-party liveness probe (PENTESTLIVE), model selection, sandbox capacity checks, and the 6 real repos
+  // from the README's run matrix.
   const EXAMPLES = [
     "go to the public repo https://github.com/usestrix/strix, load it locally and run static and if it has a server like gradio or fastapi then stand up the server and run dynamic tests, and fix the issues found in these tests.",
-    "scan https://github.com/usestrix/strix and report what you find, but do not fix anything.",
+    "check the size of https://github.com/OWNER/REPO and the sandbox's current capacity before cloning it.",
     "scan self and fix any issue you find.",
     "check the dependencies of https://github.com/usestrix/strix for known CVEs (pip-audit and npm audit).",
     "look for hardcoded secrets and leaked API keys in https://github.com/usestrix/strix.",
-    "check the versions of all your scanner tools and tell me which ones need an update.",
+    "using the Wonder model, scan https://github.com/OWNER/REPO, fix everything found, and show me the final cost.",
     "scan the private repo https://github.com/OWNER/REPO (my token is in /dynamic_pristine_rw/github_token.txt) and fix any issue you find.",
     "scan self with every scanner, fix everything you can, and give me a Word report of what you changed.",
     "go to the private repo https://github.com/OWNER/REPO (token file: /dynamic_pristine_rw/github_token.txt), load it locally and run redteam and if it has a server like gradio or fastapi then stand up the server and run pentest tests, and fix the issues found in these tests.",
     "pentest http://localhost:8080/ with ZAP, and if you get in, fix the vulnerability and prove it is closed.",
     "do a liveness and technology check on https://example.com (a site I do not own; I will type PENTESTLIVE to confirm).",
     "scan self with Bandit and Semgrep only, then explain each finding in plain language.",
+    // Page 3 (added 2026-10-30): the same 6 repos in the README's run matrix, same tasks that were actually run end
+    // to end there -- real, repeatable examples, not hypothetical ones.
+    "go to the public repo https://github.com/usestrix/strix, load it locally and run redteam and if it has a server like gradio or fastapi then stand up the server and run pentest tests, and fix the issues found in these tests.",
+    "go to the public repo https://github.com/google/pica, load it locally, run redteam, and fix any issue you find.",
+    "go to the public repo https://github.com/microsoft/TokenEconomizer, load it locally, run redteam, and fix any issue you find.",
+    "go to the public repo https://github.com/aws/tools-for-devops-agent, load it locally, run redteam, and fix any issue you find.",
+    "go to the public repo https://github.com/aws/sagemaker-python-sdk, load it locally, run redteam, and fix any issue you find.",
+    "using the Wonder model, go to the public repo https://github.com/openai/openai-agents-python, load it locally and run redteam, and if it has a server then stand up the server and run pentest tests, and fix the issues found in these tests.",
   ];
   const SHORT_LEN = 42;
   const exampleList = document.getElementById("example-list");
   const exampleNav = document.getElementById("example-nav");
+  const examplePageCount = Math.ceil(EXAMPLES.length / 6);
   let examplePage = 0;
   function renderExamples() {
     exampleList.innerHTML = "";
@@ -407,11 +418,12 @@
       });
       exampleList.appendChild(b);
     });
-    exampleNav.innerHTML = examplePage === 0 ? "&rarr;" : "&larr;";
-    exampleNav.title = examplePage === 0 ? "More example questions (7-12)" : "Back to example questions 1-6";
+    const nextPage = (examplePage + 1) % examplePageCount;
+    exampleNav.innerHTML = nextPage === 0 ? "&larr;" : "&rarr;";
+    exampleNav.title = nextPage === 0 ? "Back to example questions 1-6" : `More example questions (page ${nextPage + 1} of ${examplePageCount})`;
     exampleNav.setAttribute("aria-label", exampleNav.title);
   }
-  exampleNav.addEventListener("click", () => { examplePage = examplePage === 0 ? 1 : 0; renderExamples(); });
+  exampleNav.addEventListener("click", () => { examplePage = (examplePage + 1) % examplePageCount; renderExamples(); });
   renderExamples();
 
   // Browser-native speech (window.speechSynthesis): only when Voice is toggled ON. Every assistant message is
