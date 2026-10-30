@@ -117,6 +117,21 @@ docker run -d --name aegis-backend-web --network aegis-net -p 8900:8900 -v aegis
   -e AEGIS_REDTEAM_URL="http://aegis-redteam:7906" -e AEGIS_PENTESTLIVE_URL="http://aegis-pentestlive:7907" \
   aegis-backend:latest web >/dev/null
 
+# sandbox-web: hosts a cloned project's own server as www.sandbox.com:8900 for active pentest, plus the local
+# OpenAI stub on :8901 (added 2026-10-30). Reuses the aegis-backend image (needs its nodejs/npm for npm installs) --
+# a plain `docker restart` after only rebuilding THIS image does NOT pick up new binaries baked into aegis-backend;
+# recreate it (this command) instead. control.py is bind-mounted read-only so editing it alone is picked up by a
+# restart. This container was run by hand for a while without ever being added here -- added now so a fresh
+# `install.sh` run (or a future "did a restart really pick this up" doubt) has one canonical source, same as
+# every other container. mkdir -p guards a fresh clone that never ran this before.
+mkdir -p sandbox_web/pip_cache sandbox_web/npm_cache
+docker rm -f aegis-sandbox-web >/dev/null 2>&1 || true
+docker run -d --name aegis-sandbox-web --network aegis-net --network-alias www.sandbox.com --restart unless-stopped \
+  -v "$(pwd)/sandbox_web/control.py:/control/control.py:ro" \
+  -v "$(pwd)/dynamic_target:/dynamic_target:ro" -v "$(pwd)/self_target:/self_target:ro" \
+  -v "$(pwd)/sandbox_web/pip_cache:/pip_cache" -v "$(pwd)/sandbox_web/npm_cache:/npm_cache" \
+  --entrypoint python3 aegis-backend:latest -u /control/control.py >/dev/null
+
 sleep 3
 echo "--- redteam ---";      docker exec aegis-redteam curl -s http://127.0.0.1:7906/health; echo
 echo "--- pentestlive ---";  curl -s http://127.0.0.1:7907/health; echo
