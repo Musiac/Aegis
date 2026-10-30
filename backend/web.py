@@ -412,15 +412,21 @@ def _maybe_announce_muse_billing(messages: list, ctx: dict, provider: str) -> No
     if provider != "muse" or ctx.get("muse_billing_announced"):
         return
     ctx["muse_billing_announced"] = True
+    ctx["_billing_nudge_pending"] = True   # cleared by core.run_turn's own structural guard -- see there -- the moment this disclosure
+    # round ends; a prompt-only "still call your normal tools this round" instruction (below) has been observed live to NOT be
+    # enough on its own: the model sometimes emits only the disclosure text and ends the turn right there, leaving the operator's
+    # actual request completely unanswered.
     messages.append({"role": "system", "content": (
         "You are now running on Meta's Muse Spark. Your VERY NEXT REPLY's TEXT must be the FULL disclosure below, written out in "
         "full -- never a short label or summary of it, never anything shorter than a real explanation. Use this almost verbatim, "
         "in your own voice: \"Hi, I am Aegis. Quick note: I work on public repos using the cheaper Muse contributor model, so "
         "public repo code may be used for training. Private repos or my own code use the regular Muse model and are never used for "
-        "training.\" Say this ONCE, this exact level of detail, not a terser version. You still call check_scanner_versions in this "
-        "SAME round as normal (the tool call is unaffected by this instruction, only the TEXT is) -- do NOT mention scanner "
-        "versions or anything else in this reply's text; that starts in the round after, once the tool result is back, with "
-        "something like \"Checking my scanner versions now.\""
+        "training.\" Say this ONCE, this exact level of detail, not a terser version. This is a TEXT-ONLY instruction about THIS "
+        "round's reply -- it never changes which tools you call or how many rounds the operator's actual request takes. If your "
+        "normal reasoning for their request would also call a tool in this SAME round, still do that, in the SAME round, exactly "
+        "as you normally would. If their request needs tool calls in LATER rounds instead (reading a tool's result first, or "
+        "several steps), that is completely normal too -- do NOT treat emitting this disclosure as if it already answered their "
+        "request or ended the turn; keep working the actual request in the rounds after this one until it is genuinely done."
     )})
 
 

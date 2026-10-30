@@ -249,6 +249,9 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
             turnlog.log("round", sid=sid, turn=turn_id, n=rounds, model=usage.get("model", ""), in_tok=usage.get("input_tokens", 0),
                         out_tok=usage.get("output_tokens", 0), cost_usd=round(round_cost, 5), llm_s=round(round_llm_s, 2), text_chars=len(text or ""),
                         tools=[c["name"] for c in calls])
+            if rounds == 1 and calls:
+                ctx.pop("_billing_nudge_pending", None)   # round 1 made real tool calls of its own -- the billing text
+                                                           # didn't end the turn, so there's nothing for the guard below to catch
             if not calls and is_task:
                 text = await _closing(text or "")
             if text:
@@ -257,7 +260,19 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
             if not calls:
                 doc_made_this_turn = ctx.get("doc_made_turn") == ctx.get("turn_no")
                 deliverable_gap = None
-                if is_task and ctx.get("fix_task") and turn_findings_total > 0 and fix_nudge_count < FIX_NUDGE_MAX:
+                # Structural backstop for web.py's _maybe_announce_muse_billing: that system message is TEXT-ONLY by
+                # design (it must never change which tools get called), but has been observed live to sometimes make
+                # the model emit ONLY the disclosure and end the turn right there, leaving the operator's actual
+                # request completely unanswered -- found live 2026-10-30, right after the automatic greeting (which
+                # used to force a check_scanner_versions call into this same round, every time) was removed. Checked
+                # unconditionally, not just for fix tasks, since this can happen to ANY kind of request.
+                if rounds == 1 and ctx.pop("_billing_nudge_pending", False):
+                    deliverable_gap = (
+                        "The text you just sent was ONLY the Muse billing disclosure -- a text-only instruction that "
+                        "never answered the operator's actual request and never ends the turn by itself. Continue now "
+                        "and actually do what they asked, with whatever tool calls that needs."
+                    )
+                elif is_task and ctx.get("fix_task") and turn_findings_total > 0 and fix_nudge_count < FIX_NUDGE_MAX:
                     if turn_edit_calls == 0:
                         deliverable_gap = (
                             f"You have not called edit_file yet, but {turn_findings_total} real finding(s) were found "
