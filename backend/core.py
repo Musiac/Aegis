@@ -383,23 +383,6 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
                 await on_tool_call(tc["name"], tc["arguments"], result)
                 messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
             await filler.stop()
-            if rounds <= 2:
-                # Structural backstop for web.py's _maybe_announce_muse_billing -- same spirit as the billing-nudge
-                # guard above, different failure mode: the model has been observed live to skip check_scanner_versions
-                # entirely and go straight into the operator's real task (clone/scan/fix), satisfying "some tool call
-                # happened this round" without ever doing the recency check or offering an update. Checked through
-                # round 2, not just round 1, so a round-1 empty-calls nudge (the OTHER guard, above) still leaves one
-                # more chance for this one to fire before giving up; cleared either way by round 2 so it only ever
-                # applies to the turn it was set for.
-                if ctx.get("_scanner_check_nudge_pending") and "check_scanner_versions" not in tool_counts:
-                    messages.append({"role": "user", "content": (
-                        "You have not called check_scanner_versions yet this session -- that was required this round, "
-                        "separate from the operator's own request. Call it now, report the results (asking about an "
-                        "update if anything is outdated, same as its own instructions), THEN continue with the "
-                        "operator's actual request in the rounds after."
-                    )})
-                    continue
-                ctx.pop("_scanner_check_nudge_pending", None)   # satisfied or never required -- never checked again past round 1
             if is_task and not ctx.get("fix_task") and ctx.get("pending_doc") and (ctx.get("last_zap") or {}).get("turn") == ctx["turn_no"]:
                 # An active-ZAP task whose report was accepted: the closing message is written by code from the scan result (identical for
                 # every model, nothing invented) and the model's own closing call is skipped.

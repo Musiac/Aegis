@@ -404,14 +404,37 @@ async def ws_asr(ws: WebSocket):
             pass
 
 
+def _format_scanner_versions(result: str) -> tuple:
+    """Shared by the no-MUSE-key fallback and _run_greeting's own real check below -- one formatting rule, used
+    everywhere a scanner_versions result becomes chat text, so the two paths can never drift apart. Returns
+    (lines, outdated) where outdated is the real {name: {current, latest}} dict for whatever is behind, straight
+    from the tool's own JSON -- never re-derived or guessed."""
+    try:
+        parsed = json.loads(result)
+    except ValueError:
+        return [], {}
+    lines, outdated = [], {}
+    for tool in parsed.get("tools", []) if isinstance(parsed, dict) else []:
+        name, current, latest, status = tool.get("name", "?"), tool.get("current", "?"), tool.get("latest"), tool.get("status")
+        if status == "latest" or status == "system-managed":
+            lines.append(f"- ✅ {name} {current} (latest)" if status == "latest" else f"- ✅ {name} {current} (system-managed)")
+        elif status == "update_available":
+            lines.append(f"- ⚠️ {name} {current} → {latest} available")
+            outdated[name] = {"current": current, "latest": latest}
+        else:
+            lines.append(f"- ❓ {name}: version check failed ({tool.get('error', 'unknown error')})")
+    return lines, outdated
+
+
 def _maybe_announce_muse_billing(messages: list, ctx: dict, provider: str) -> None:
     """Once per session, the moment "muse" is first the active provider, tells the model to disclose the public/contributor vs.
     private/Standard billing split in its own next reply -- added 2026-10-27, owner's own instruction: the operator should be told this
     up front, not just have it happen silently in the background. core.run_turn's repo_visibility tracking (see its own comment) is what
-    actually picks the model per call; this only makes the model SAY what it's doing. Also where the scanner-tool-recency check now
-    happens (added 2026-10-30, owner's own instruction after the automatic greeting was shortened to a single fixed line and the
-    recency check -- and the chance to offer an update -- stopped happening on its own): still once per session, still gated on this
-    same first-real-task moment, just no longer inside the greeting itself."""
+    actually picks the model per call; this only makes the model SAY what it's doing.
+    The scanner-tool-recency check used to also be folded into this same system message (2026-10-30) -- moved OUT and made fully
+    code-driven in _run_greeting instead (2026-10-30, same day, owner's own live test): asking the model to also call
+    check_scanner_versions in this SAME round, on top of the disclosure, was observed to simply not happen some of the time --
+    a prompt-reliant "also do X" instruction is exactly the kind of thing this whole codebase prefers never to depend on alone."""
     if provider != "muse" or ctx.get("muse_billing_announced"):
         return
     ctx["muse_billing_announced"] = True
@@ -419,24 +442,17 @@ def _maybe_announce_muse_billing(messages: list, ctx: dict, provider: str) -> No
     # round ends; a prompt-only "still call your normal tools this round" instruction (below) has been observed live to NOT be
     # enough on its own: the model sometimes emits only the disclosure text and ends the turn right there, leaving the operator's
     # actual request completely unanswered.
-    ctx["_scanner_check_nudge_pending"] = True   # same backstop, same core.run_turn guard, for a DIFFERENT failure mode: the model
-    # has been observed live to skip check_scanner_versions entirely and go straight to the operator's real task (clone/scan/fix),
-    # satisfying "some tool call happened" without ever doing the recency check or offering an update at all.
     messages.append({"role": "system", "content": (
         "You are now running on Meta's Muse Spark. Your VERY NEXT REPLY's TEXT must be the FULL disclosure below, written out in "
         "full -- never a short label or summary of it, never anything shorter than a real explanation. Use this almost verbatim, "
         "in your own voice: \"Hi, I am Aegis. Quick note: I work on public repos using the cheaper Muse contributor model, so "
         "public repo code may be used for training. Private repos or my own code use the regular Muse model and are never used for "
-        "training.\" Say this ONCE, this exact level of detail, not a terser version. "
-        "In this SAME round, ALSO call check_scanner_versions (this is required, not optional, and is separate from and in addition "
-        "to the operator's own request below) -- the next round after its result comes back is where you narrate something like "
-        "\"Checking my tool's recency...\" and report it, following check_scanner_versions's own instructions about asking whether "
-        "to update anything outdated. It is completely fine, expected even, for that round to end there with a question and no "
-        "further tool calls, waiting for the operator's answer before starting their actual request -- that is not an incomplete "
-        "turn, it is the right place to pause. Only once that is resolved (updated, declined, or nothing was outdated) do you move "
-        "on to their actual request, in the rounds after. This is a TEXT-ONLY instruction about THIS round's disclosure sentence -- "
-        "it never changes which tools you call or how many rounds the operator's actual request takes once you get to it; do NOT "
-        "treat emitting the disclosure, or the scanner check, as if it already answered their request or ended the turn."
+        "training.\" Say this ONCE, this exact level of detail, not a terser version. This is a TEXT-ONLY instruction about THIS "
+        "round's reply -- it never changes which tools you call or how many rounds the operator's actual request takes. If your "
+        "normal reasoning for their request would also call a tool in this SAME round, still do that, in the SAME round, exactly "
+        "as you normally would. If their request needs tool calls in LATER rounds instead (reading a tool's result first, or "
+        "several steps), that is completely normal too -- do NOT treat emitting this disclosure as if it already answered their "
+        "request or ended the turn; keep working the actual request in the rounds after this one until it is genuinely done."
     )})
 
 
@@ -580,17 +596,7 @@ async def ws_endpoint(ws: WebSocket):
             result = await check_scanner_versions({}, ctx)
             await _send({"type": "terminal", "line": "-> check_scanner_versions()"})
             await _send({"type": "terminal", "line": f"   {result[:600]}"})
-            # Real shape, redteam/server.py's /scanner_versions: {"ok": bool, "tools": [{"name","current","latest","status",...}]}.
-            parsed = json.loads(result)
-            lines = []
-            for tool in parsed.get("tools", []) if isinstance(parsed, dict) else []:
-                name, current, latest, status = tool.get("name", "?"), tool.get("current", "?"), tool.get("latest"), tool.get("status")
-                if status == "latest" or status == "system-managed":
-                    lines.append(f"- ✅ {name} {current} (latest)" if status == "latest" else f"- ✅ {name} {current} (system-managed)")
-                elif status == "update_available":
-                    lines.append(f"- ⚠️ {name} {current} → {latest} available")
-                else:
-                    lines.append(f"- ❓ {name}: version check failed ({tool.get('error', 'unknown error')})")
+            lines, _ = _format_scanner_versions(result)
             if lines:
                 await _send({"type": "chat", "text": "\n".join(lines)})
         except Exception as e:                                                  # noqa: BLE001 -- the fallback path itself must never crash the socket
@@ -686,13 +692,31 @@ async def ws_endpoint(ws: WebSocket):
 
 
 async def _run_greeting(ws, messages, ctx, on_text, on_tool_call, _total_cost_usd) -> None:
-    """A fixed, code-written line -- no LLM round at all (shortened 2026-10-30, owner's own instruction: the old
-    version ran check_scanner_versions + verify_sandbox_safety automatically on every connect and narrated both in
-    full before the operator could say anything, which read as slow and over-long for a first hello). Those two
-    tools are still real and still callable on request (system_prompt.py's own note covers that); they are simply
-    no longer run unprompted at startup. _maybe_announce_muse_billing's disclosure still happens -- just naturally,
-    on the operator's first real task (see its call site in the main receive loop below), since there is no longer
-    an LLM round here for it to attach to."""
+    """A fixed line, then a REAL scanner-version check -- both fully code-driven, no LLM round at all (shortened
+    2026-10-30, owner's own instruction: the old version ran check_scanner_versions + verify_sandbox_safety
+    automatically on every connect and narrated both in full before the operator could say anything, which read as
+    slow and over-long for a first hello). verify_sandbox_safety is still real and callable on request
+    (system_prompt.py's own note covers that); it just isn't run unprompted at startup anymore. The scanner-version
+    check IS still automatic (owner's own instruction, same day): first tried as a prompt-only "also call this tool"
+    instruction folded into _maybe_announce_muse_billing, found live to simply not fire reliably -- moved here
+    instead, as a direct function call, so it can never silently fail to happen the way a model-side instruction
+    can. Send stays disabled for the WHOLE function (the caller doesn't re-enable it until "done" arrives after
+    this returns), so the operator sees the real tool state before they can send anything, not just a static line."""
     await on_text("Hi, I am Aegis. How can I help you?")
+    try:
+        result = await check_scanner_versions({}, ctx)
+        await on_tool_call("check_scanner_versions", {}, result)
+        lines, outdated = _format_scanner_versions(result)
+        if lines:
+            report = "Checking my tool's recency:\n\n" + "\n".join(lines)
+            if outdated:
+                names = ", ".join(f"{n} {v['current']} -> {v['latest']}" for n, v in outdated.items())
+                report += f"\n\n{names} -- would you like me to update {'it' if len(outdated) == 1 else 'them'} now? This updates live for the rest of this session only (it does not survive a container restart)."
+            await on_text(report)
+            # So a later "yes, update it" has real context to act on -- the model sees this exact report and
+            # question as its own earlier turn, the same way it would if it had generated the text itself.
+            messages.append({"role": "assistant", "content": report})
+    except Exception as e:                                                       # noqa: BLE001 -- a bad scanner-version check must never block the session from opening
+        await ws.send_text(json.dumps({"type": "error", "text": f"Scanner version check failed: {type(e).__name__}: {e}"}))
     await ws.send_text(json.dumps({"type": "cost", "total_usd": _total_cost_usd()}))
     await ws.send_text(json.dumps({"type": "done"}))
