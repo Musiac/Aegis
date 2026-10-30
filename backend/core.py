@@ -184,6 +184,15 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
     turn_export_ok = False
     fix_nudge_count = 0
     FIX_NUDGE_MAX = 2   # one for "never fixed anything", one for "fixed but never exported/reported" -- bounded, not unlimited
+    # Real cost found live 2026-10-29 (usestrix/strix, no standard FastAPI/Gradio server): the model spent 16
+    # rounds trying different ways to launch a genuinely non-standard dynamic-test server (a bad mkdir flag, a
+    # bad PYTHONPATH= invocation, a missing file...) before giving up on its own and moving to static fixes --
+    # each attempt was a real, different approach (never literally repeated, so the existing exact-signature
+    # repeat counter never caught it), but a dynamic test was always a bonus, never a requirement, so this much
+    # retrying before giving up is pure wasted round/token cost. Counted here, reset to 0 the moment one actually
+    # succeeds.
+    turn_server_start_fails = 0
+    SERVER_START_FAIL_MAX = 2
 
 
     def _task_cost() -> float:
@@ -372,6 +381,22 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
                 elif tc["name"] == "create_word_document" and '"created": true' in result:
                     ctx["doc_done"] = True
                     ctx["doc_made_turn"] = ctx.get("turn_no")
+                elif tc["name"] == "sandbox_app_start":
+                    try:
+                        start_ok = json.loads(result).get("ok")
+                    except (ValueError, TypeError, AttributeError):
+                        start_ok = None
+                    if start_ok:
+                        turn_server_start_fails = 0
+                    else:
+                        turn_server_start_fails += 1
+                        if turn_server_start_fails == SERVER_START_FAIL_MAX:
+                            messages.append({"role": "system", "content": (
+                                f"sandbox_app_start has now failed {SERVER_START_FAIL_MAX} times this turn. A dynamic "
+                                "test is a bonus, never a requirement -- stop trying to stand this server up. Move "
+                                "straight to fixing the static findings already found (edit_file), then export and "
+                                "report, same as any turn with no dynamic coverage at all."
+                            )})
                 dt = time.monotonic() - t1
                 tool_s += dt
                 info = turnlog.summarize_result(result)

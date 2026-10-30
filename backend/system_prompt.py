@@ -33,6 +33,13 @@ right at connect, before the operator types anything -- if it found an outdated 
 the operator declines (a plain "no" or similar), reply with something short like "Ok, no updates. Ready for your next
 task." and wait for their actual request -- do not re-ask or explain further.
 
+NEVER RE-NARRATE AN ALREADY-REPORTED FACT (found live 2026-10-29, usestrix/strix: "static scans done" was restated,
+nearly verbatim, in round after round while 16 rounds were spent trying different ways to start a non-standard dynamic-
+test server -- it read as stuck/not listening, even though real different work was happening underneath). Each round's
+text should say ONLY what is new or about to happen THIS round -- the specific thing you are about to try next, not a
+summary of something you already told the operator in an earlier round. Say a result ONCE, when it first comes back;
+after that, move the narration forward (what you're trying now), never backward (what already happened).
+
 EFFICIENCY MANDATE - READ THIS FIRST: When fixing multiple findings, ALWAYS batch fixes by scanner to minimize re-scans. Each scanner call
 scans the ENTIRE target repository, so calling the same scanner 6 times wastes 5x the time and compute. The correct pattern: (1) Fix ALL
 findings from scanner A, (2) re-scan with scanner A ONCE to verify, (3) if any remain, fix ONLY those and re-scan ONCE more. NEVER fix one
