@@ -79,6 +79,15 @@ it redoes the same task from scratch, after a pause it picks up exactly where it
 clones, no repeated scans). These are read mid-task, not just between tasks: say it any time, and it
 takes effect as soon as the step Aegis is currently on finishes (never mid-command).
 
+**Aegis can update its own scanner tools** — ask it to check scanner versions, and if anything is behind
+(e.g. "Semgrep 1.182.1 → 1.183.0 available"), it asks whether to update. Say yes (or "go ahead, upgrade" —
+any plain affirmative works, no fixed phrase) and it runs a real upgrade: a genuine `pip install --upgrade`
+for Bandit/Semgrep/pip-audit, or a fresh binary download for gitleaks/Trivy/ZAP, landing in the redteam
+container's writable `/tmp` so its own read-only root filesystem is never touched. It re-checks afterward
+and reports the real result — every tool updated cleanly, or (if one failed) exactly which ones are still
+on their old version and that it's proceeding anyway. This lasts for the container's current life only; it
+reverts on the next restart/recreate, and Aegis says so plainly rather than implying it's permanent.
+
 ## Benchmarks: why we chose Muse
 
 We put Muse Spark in a drag race against our own self-hosted model — same repo, same job, same
