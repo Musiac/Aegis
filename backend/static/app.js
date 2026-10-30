@@ -226,10 +226,12 @@
   }
 
   function setBusy(busy) {
-    // Typing and editing stay open while she works so the next task can be prepared; only sending is blocked (button disabled, and the
-    // submit handler ignores Enter while busy).
+    // Typing stays open while she works, same as before -- but Send/Enter now stays enabled too (2026-10-29): a
+    // message sent while busy is read by the server as a possible "stop"/"pause" interrupt (see web.py's
+    // ws_endpoint), so disabling Send here would make those words impossible to actually deliver mid-task. The
+    // submit handler below still shows the normal pending-dots UI only when nothing was already in flight.
     isBusy = busy;
-    sendBtn.disabled = busy || !museConfigured;
+    sendBtn.disabled = !museConfigured;
     // Dots in two places at once, per the owner: a pill next to Send (at-a-glance, before even looking at the
     // chat pane) AND inline next to "Aegis" in the chat turn (showPendingDots/clearPendingDots below).
     taskDots.style.display = busy ? "inline-flex" : "none";
@@ -322,9 +324,13 @@
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
     const text = input.value.trim();
-    if (isBusy || !text || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
     addChatMsg("user", text);
-    setBusy(true);
+    // While a turn is already running, this message's own words decide what happens server-side (stop/pause
+    // interrupt the running turn; anything else is rejected with an explanatory error) -- so a brand new pending
+    // "Aegis is thinking" placeholder is only shown when nothing was already in flight. The busy pill/dots stay
+    // up either way since the ORIGINAL task is still genuinely running.
+    if (!isBusy) setBusy(true);
     // The dropdown is read on EVERY message, so changing it mid-session takes effect on the next task.
     const payload = { type: "user_message", text, provider: providerSelect.value || "" };
     ws.send(JSON.stringify(payload));

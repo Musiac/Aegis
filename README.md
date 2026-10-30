@@ -72,6 +72,13 @@ we trust Muse enough to build Aegis on it, not as part of the submission's own w
 `<target>` starts as "Aegis's own source" (self-scan) and a cloned copy of any public GitHub repo
 you point it at (`run redteam on github repo: <url>`) — see "Status" below for what's live today.
 
+**Stop, pause and resume mid-task** — just type it, no special syntax: "stop" / "restart" / "rewind"
+cancels whatever is running and discards its progress; "pause" cancels but keeps every step done so far.
+Either way, saying "start" or "continue" afterward picks the right behavior automatically — after a stop
+it redoes the same task from scratch, after a pause it picks up exactly where it left off (no repeated
+clones, no repeated scans). These are read mid-task, not just between tasks: say it any time, and it
+takes effect as soon as the step Aegis is currently on finishes (never mid-command).
+
 ## Benchmarks: why we chose Muse
 
 We put Muse Spark in a drag race against our own self-hosted model — same repo, same job, same

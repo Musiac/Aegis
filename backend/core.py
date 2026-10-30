@@ -206,6 +206,20 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
         return text.rstrip() + f"\n\n**Completed task in:** {_fmt_elapsed(elapsed)}. **Total cost:** ${task_cost:.3f}, **Model:** {provider}"
     try:
         for _round_no in range(MAX_ROUNDS):
+            # Checked ONLY here -- a clean round boundary, never mid-round -- because every assistant message with
+            # tool_calls already has a matching tool-result message for each one by this point (the tool-call loop
+            # below always runs to completion before the next iteration), so the conversation history is always in
+            # a valid, resumable state when we stop here. Checking mid-tool-call-loop instead would risk leaving a
+            # dangling tool_call with no result, which the next LLM call for a paused-then-resumed turn would reject.
+            # Set by web.py's ws_endpoint when the operator sends "stop"/"pause" while this turn is still running
+            # (a separate concurrent task reads the next websocket message and writes this flag; see there for how
+            # "stop" rolls `messages` back to before this turn and "pause" leaves it exactly as accumulated so the
+            # next "start"/"continue" can resume this same run_turn call from here).
+            control = ctx.pop("_control_request", None)
+            if control in ("stop", "pause"):
+                ctx["_control_result"] = control
+                end_reason = control
+                return
             rounds += 1
             t0 = time.monotonic()
             # While the closing message is being written after the report was accepted, the last "preparing your download link" line stays up.

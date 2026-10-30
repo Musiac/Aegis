@@ -424,36 +424,65 @@ def _maybe_announce_muse_billing(messages: list, ctx: dict, provider: str) -> No
     )})
 
 
+_STOP_RE = re.compile(r"\b(stop|restart|rewind)\b", re.I)
+_PAUSE_RE = re.compile(r"\bpause\b", re.I)
+_RESUME_RE = re.compile(r"\b(start|continue|resume)\b", re.I)
+
+
+def _control_word(text: str):
+    """stop/restart/rewind all mean the same thing here -- discard this turn's in-progress work, the next
+    start/continue redoes the task from scratch. pause means the opposite -- keep every round/tool result
+    made so far, the next start/continue picks the SAME run_turn call back up exactly where it left off.
+    Checked against the operator's own words, so "Hi Aegis, please stop" and a bare "stop" both match --
+    only the keyword matters, not any greeting wrapped around it. Precedence: stop beats pause beats resume,
+    so a message that happens to contain more than one is read as the most interrupting one."""
+    if _STOP_RE.search(text):
+        return "stop"
+    if _PAUSE_RE.search(text):
+        return "pause"
+    if _RESUME_RE.search(text):
+        return "resume"
+    return None
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
     messages = new_session()
     dropdown_choice = ""   # taken from each message's "provider" field; "" lets pick_provider auto-route every turn
+    send_lock = asyncio.Lock()     # serializes every send: once a turn runs as a background task (see below), the
+    # receive loop and that task can both want to write to the SAME websocket at the same time, and concurrent
+    # sends on one `ws.send_text` are not safe.
+    turn_state = {"task": None}    # the asyncio.Task currently running run_turn, or None between turns
+
+    async def _send(payload: dict) -> None:
+        async with send_lock:
+            await ws.send_text(json.dumps(payload))
 
     async def on_text(text: str) -> None:
-        await ws.send_text(json.dumps({"type": "chat", "text": text}))
+        await _send({"type": "chat", "text": text})
 
     async def on_tool_call(name: str, args: dict, result: str) -> None:
         # The whole command, not a 200-char cut: the owner wants to see every command she runs. Only a very long value (a report body,
         # a pasted file) is replaced by its size so one line cannot flood the pane.
         shown = {k: (f"<{len(v)} chars>" if isinstance(v, str) and len(v) > 1500 else v) for k, v in (args or {}).items()}
         preview = json.dumps(shown, ensure_ascii=False)
-        await ws.send_text(json.dumps({"type": "terminal", "line": f"-> {name}({preview})"}))
-        await ws.send_text(json.dumps({"type": "terminal", "line": f"   {result[:600]}"}))
+        await _send({"type": "terminal", "line": f"-> {name}({preview})"})
+        await _send({"type": "terminal", "line": f"   {result[:600]}"})
 
     async def emit_terminal_progress(name: str, text: str) -> None:
         """pentest_zap's live spider/active-scan progress -- see redteam_tools.py's ctx["emit_terminal_progress"] call site."""
-        await ws.send_text(json.dumps({"type": "terminal", "line": f"[{name}] {text}"}))
+        await _send({"type": "terminal", "line": f"[{name}] {text}"})
 
     async def emit_document(doc: dict) -> None:
         """create_word_document's real file -- sent as its OWN message type, never folded into a "terminal" line (those truncate to
         600 chars; a docx's base64 would both blow past that and clutter the terminal pane with binary noise)."""
-        await ws.send_text(json.dumps({"type": "document", **doc}))
-        await ws.send_text(json.dumps({"type": "terminal", "line": f"[report] {doc['filename']} ({round(doc['size'] / 1024)} KB) -- see the download card"}))
+        await _send({"type": "document", **doc})
+        await _send({"type": "terminal", "line": f"[report] {doc['filename']} ({round(doc['size'] / 1024)} KB) -- see the download card"})
 
     async def emit_status(text: str) -> None:
         """A short transient 'now doing X' line for the chat pane (empty text clears it). Never stored as a chat message."""
-        await ws.send_text(json.dumps({"type": "status", "text": text}))
+        await _send({"type": "status", "text": text})
 
     ctx = {"emit_status": emit_status, "emit_terminal_progress": emit_terminal_progress, "emit_document": emit_document, "sid": uuid.uuid4().hex[:6]}
     # Lets core.py's per-task cost line include ASR/TTS spend (tracked here, module-level, keyed by sid) without
@@ -462,7 +491,7 @@ async def ws_endpoint(ws: WebSocket):
     turnlog.log("session_open", sid=ctx["sid"])
     # Lets the browser attribute push-to-talk's /ws/asr cost (billed per utterance, on a separate WebSocket -- see
     # _asr_cost_by_sid above) back to THIS session's displayed total, by passing it as /ws/asr?sid=...
-    await ws.send_text(json.dumps({"type": "sid", "sid": ctx["sid"]}))
+    await _send({"type": "sid", "sid": ctx["sid"]})
 
     # Deterministic, code-driven, runs every single new connection -- not an LLM tool call, so it can never be skipped, forgotten or
     # argued out of by the model the way a prompt-instructed step can be. Nothing in /dynamic_pristine_rw, /dynamic_target or /REPL/work
@@ -471,20 +500,53 @@ async def ws_endpoint(ws: WebSocket):
     # /cleanup_targets for what each actually removes.
     try:
         sandbox_result = await cleanup_sandbox_scratch({}, ctx)
-        await ws.send_text(json.dumps({"type": "terminal", "line": "-> cleanup_sandbox_scratch()"}))
-        await ws.send_text(json.dumps({"type": "terminal", "line": f"   {sandbox_result[:600]}"}))
+        await _send({"type": "terminal", "line": "-> cleanup_sandbox_scratch()"})
+        await _send({"type": "terminal", "line": f"   {sandbox_result[:600]}"})
     except Exception as e:                                                       # noqa: BLE001 -- startup cleanup must never block the session from opening
-        await ws.send_text(json.dumps({"type": "terminal", "line": f"   cleanup_sandbox_scratch failed: {type(e).__name__}: {e}"}))
+        await _send({"type": "terminal", "line": f"   cleanup_sandbox_scratch failed: {type(e).__name__}: {e}"})
     try:
         redteam_result = await cleanup_redteam_scratch({}, ctx)
-        await ws.send_text(json.dumps({"type": "terminal", "line": "-> cleanup_redteam_scratch()"}))
-        await ws.send_text(json.dumps({"type": "terminal", "line": f"   {redteam_result[:600]}"}))
+        await _send({"type": "terminal", "line": "-> cleanup_redteam_scratch()"})
+        await _send({"type": "terminal", "line": f"   {redteam_result[:600]}"})
     except Exception as e:                                                       # noqa: BLE001 -- same as above
-        await ws.send_text(json.dumps({"type": "terminal", "line": f"   cleanup_redteam_scratch failed: {type(e).__name__}: {e}"}))
+        await _send({"type": "terminal", "line": f"   cleanup_redteam_scratch failed: {type(e).__name__}: {e}"})
 
     def _total_cost_usd() -> float:
         return (ctx.get("session_cost_usd", 0.0) + _asr_cost_by_sid.get(ctx["sid"], 0.0)
                 + _gemini_tts_cost_by_sid.get(ctx["sid"], 0.0))
+
+    async def _run_and_finish(provider: str, pre_turn_len: int) -> None:
+        """Runs one turn as a background task so the receive loop above stays free to read the operator's NEXT
+        message while this one is still going -- that concurrency is the only way a "stop"/"pause" sent mid-task
+        can ever reach core.run_turn's own control check (see there) in time to matter, instead of just sitting
+        unsent in a disabled input box the way it did before this existed."""
+        try:
+            await run_turn(provider, messages, ctx, on_text, on_tool_call)
+        except Exception as e:                                                   # noqa: BLE001 -- a bad LLM response must never kill the socket
+            # Printed to stdout (docker logs) too -- previously this error only ever reached the client's chat pane,
+            # so a real exception left ZERO trace in the server's own logs, making "did it actually error, or did the
+            # client just lose the message" impossible to tell from the server side alone.
+            print(f"[ws] run_turn raised {type(e).__name__}: {e}", flush=True)
+            await _send({"type": "error", "text": f"{type(e).__name__}: {e}" if str(e) else
+                        f"{type(e).__name__}: could not reach the model server (tried 3 times). Your scan and any report already made are not lost -- send your message again."})
+        finally:
+            control_result = ctx.pop("_control_result", None)
+            if control_result == "stop":
+                del messages[pre_turn_len:]     # erase this turn's user message and every round/tool result it made -- the next
+                                                 # "start"/"continue" redoes ctx["last_user_text"] as a genuinely fresh turn
+                ctx["_control_state"] = "stopped"
+                await _send({"type": "chat", "text": 'Stopped. Say "start" or "continue" to run that again from the beginning, or send a new request.'})
+            elif control_result == "pause":
+                ctx["_control_state"] = "paused"       # messages left exactly as accumulated -- see "resume" handling below
+                await _send({"type": "chat", "text": 'Paused. Say "start" or "continue" to pick up exactly where I left off.'})
+            else:
+                ctx.pop("_control_state", None)
+            # The FINAL value for this turn -- run_turn has already finished accumulating every LLM round's cost into
+            # ctx["session_cost_usd"] by the time we get here, so this is always the up-to-date running total, never a
+            # partial mid-turn figure.
+            await _send({"type": "cost", "total_usd": _total_cost_usd()})
+            await _send({"type": "done"})
+            turn_state["task"] = None
 
     # Specifically "muse" missing -- not "no provider at all" (available_providers() now also sees GOOGLE_API_KEY,
     # added 2026-10-27 for the Voice toggle's TTS; that key has nothing to do with chat on this Muse-only build, and
@@ -494,14 +556,14 @@ async def ws_endpoint(ws: WebSocket):
     # a fixed greeting sentence plus a REAL scanner-version check (check_scanner_versions needs no model, just the
     # redteam container), then stop. Send stays disabled -- the frontend gates that off /api/providers too.
     if "muse" not in available_providers():
-        await ws.send_text(json.dumps({"type": "chat", "text": (
+        await _send({"type": "chat", "text": (
             "Hi, I'm Aegis. **MUSE_API_KEY is not set** on this host, so I can't chat yet -- copy `.env.example` to "
             "`.env` and fill it in, then reload this page. In the meantime, here's my scanner tooling status:"
-        )}))
+        )})
         try:
             result = await check_scanner_versions({}, ctx)
-            await ws.send_text(json.dumps({"type": "terminal", "line": "-> check_scanner_versions()"}))
-            await ws.send_text(json.dumps({"type": "terminal", "line": f"   {result[:600]}"}))
+            await _send({"type": "terminal", "line": "-> check_scanner_versions()"})
+            await _send({"type": "terminal", "line": f"   {result[:600]}"})
             # Real shape, redteam/server.py's /scanner_versions: {"ok": bool, "tools": [{"name","current","latest","status",...}]}.
             parsed = json.loads(result)
             lines = []
@@ -514,10 +576,10 @@ async def ws_endpoint(ws: WebSocket):
                 else:
                     lines.append(f"- ❓ {name}: version check failed ({tool.get('error', 'unknown error')})")
             if lines:
-                await ws.send_text(json.dumps({"type": "chat", "text": "\n".join(lines)}))
+                await _send({"type": "chat", "text": "\n".join(lines)})
         except Exception as e:                                                  # noqa: BLE001 -- the fallback path itself must never crash the socket
-            await ws.send_text(json.dumps({"type": "error", "text": f"Scanner version check failed: {type(e).__name__}: {e}"}))
-        await ws.send_text(json.dumps({"type": "done"}))
+            await _send({"type": "error", "text": f"Scanner version check failed: {type(e).__name__}: {e}"})
+        await _send({"type": "done"})
     else:
         await _run_greeting(ws, messages, ctx, on_text, on_tool_call, _total_cost_usd)
 
@@ -531,42 +593,77 @@ async def ws_endpoint(ws: WebSocket):
             if msg.get("type") != "user_message":
                 continue
             if "muse" not in available_providers():
-                await ws.send_text(json.dumps({"type": "error", "text": "No LLM provider is configured (MUSE_API_KEY is not set)."}))
-                await ws.send_text(json.dumps({"type": "done"}))
+                await _send({"type": "error", "text": "No LLM provider is configured (MUSE_API_KEY is not set)."})
+                await _send({"type": "done"})
                 continue
             text = str(msg.get("text") or "").strip()
             if not text:
                 continue
             if "provider" in msg:                      # the dropdown can change between tasks: honour the latest choice
                 dropdown_choice = str(msg.get("provider", "")).strip()
+
+            control = _control_word(text)
+            busy_task = turn_state["task"]
+            busy = busy_task is not None and not busy_task.done()
+
+            if busy:
+                # A turn is already running as a background task (see _run_and_finish/create_task below) -- this
+                # message landed WHILE it's still going, which is the one case that matters for stop/pause: the
+                # flag below is read at the next round boundary inside core.run_turn's own loop (never mid-round,
+                # see the comment there). Anything that is not stop/pause while busy is rejected rather than
+                # queued -- queuing silently would mean the operator's words land as a DIFFERENT turn's opening
+                # message later, with no clear "this applied to which task" story in the transcript.
+                if control == "stop":
+                    ctx["_control_request"] = "stop"
+                    await _send({"type": "chat", "text": "Stopping after the step that's running now..."})
+                elif control == "pause":
+                    ctx["_control_request"] = "pause"
+                    await _send({"type": "chat", "text": "Pausing after the step that's running now..."})
+                else:
+                    await _send({"type": "error", "text": 'Still working on the previous task -- say "pause" or "stop" to interrupt, or wait for it to finish.'})
+                continue
+
             try:
                 # Re-picked every turn, not cached: if the operator left the dropdown on "auto" (dropdown_choice=="")
                 # and has a personal AEGIS_SCAN_PROVIDER/AEGIS_FIX_PROVIDER split configured, each message's
                 # OWN wording decides scan vs fix routing -- see core.pick_provider.
                 provider = pick_provider(dropdown_choice, user_text=text)
             except ProviderError as e:
-                await ws.send_text(json.dumps({"type": "error", "text": str(e)}))
-                await ws.send_text(json.dumps({"type": "done"}))
+                await _send({"type": "error", "text": str(e)})
+                await _send({"type": "done"})
                 continue
-            await ws.send_text(json.dumps({"type": "terminal", "line": f"provider: {provider}"}))
+
+            control_state = ctx.get("_control_state")
+            if control == "resume" and control_state == "paused":
+                # Resume a pause: `messages` already holds every round/tool-result made before the pause, in a
+                # valid, completable state (see core.run_turn's control check) -- a short nudge, not the operator's
+                # literal "continue"/"start" text, keeps the model from treating this as a brand new request.
+                ctx.pop("_control_state", None)
+                messages.append({"role": "user", "content": "[resumed after a pause] Continue exactly where you left off -- do not restart or repeat already-finished steps."})
+            elif control == "resume" and control_state == "stopped":
+                # Resume a stop: there is nothing left to continue (the stopped turn's own messages were already
+                # erased in _run_and_finish), so "start"/"continue" here means redo the SAME task from scratch.
+                ctx.pop("_control_state", None)
+                replay_text = ctx.get("last_user_text") or text
+                await _send({"type": "chat", "text": f'Restarting: "{replay_text}"'})
+                text = replay_text
+                ctx["last_user_text"] = replay_text
+                messages.append({"role": "user", "content": replay_text})
+            else:
+                ctx.pop("_control_state", None)
+                if control not in ("stop", "pause"):   # a bare idle "stop"/"pause" (nothing was running) is a no-op
+                    ctx["last_user_text"] = text        # chat turn, not a new task to remember for a later restart
+                messages.append({"role": "user", "content": text})
+
+            await _send({"type": "terminal", "line": f"provider: {provider}"})
             _maybe_announce_muse_billing(messages, ctx, provider)
-            messages.append({"role": "user", "content": text})
-            try:
-                await run_turn(provider, messages, ctx, on_text, on_tool_call)
-            except Exception as e:                                               # noqa: BLE001 -- a bad LLM response must never kill the socket
-                # Printed to stdout (docker logs) too -- previously this error only ever reached the client's chat pane,
-                # so a real exception left ZERO trace in the server's own logs, making "did it actually error, or did the
-                # client just lose the message" impossible to tell from the server side alone.
-                print(f"[ws] run_turn raised {type(e).__name__}: {e}", flush=True)
-                await ws.send_text(json.dumps({"type": "error", "text": f"{type(e).__name__}: {e}" if str(e) else
-                                               f"{type(e).__name__}: could not reach the model server (tried 3 times). Your scan and any report already made are not lost -- send your message again."}))
-            # The FINAL value for this turn -- run_turn has already finished accumulating every LLM round's cost into
-            # ctx["session_cost_usd"] by the time we get here, so this is always the up-to-date running total, never a
-            # partial mid-turn figure.
-            await ws.send_text(json.dumps({"type": "cost", "total_usd": _total_cost_usd()}))
-            await ws.send_text(json.dumps({"type": "done"}))
+            pre_turn_len = len(messages) - 1   # the length BEFORE the user message just appended above -- a later
+                                                # "stop" truncates back to exactly this, erasing that message too
+            turn_state["task"] = asyncio.create_task(_run_and_finish(provider, pre_turn_len))
     except WebSocketDisconnect:
         print("[ws] client disconnected", flush=True)
+        if turn_state["task"] and not turn_state["task"].done():
+            turn_state["task"].cancel()        # nothing is listening for this turn's output anymore -- stop burning real tool/LLM time on it
         turnlog.log("session_close", sid=ctx["sid"], turns=ctx.get("turn_no", 0), session_cost_usd=round(ctx.get("session_cost_usd", 0.0), 4))
     except Exception as e:                                                        # noqa: BLE001 -- log anything else that would otherwise vanish silently
         print(f"[ws] ws_endpoint raised {type(e).__name__}: {e}", flush=True)
