@@ -209,13 +209,14 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
         (measured here by code, never by the model), so the report footer and the chat line always match."""
         await on_tool_call("get_current_datetime", {}, get_current_datetime())
         elapsed, task_cost = time.monotonic() - wall0, _task_cost()
+        model_label = ctx.get("last_model_used") or provider
         had_pending_doc = bool(ctx.get("pending_doc"))
-        await flush_pending_doc(ctx, elapsed, task_cost, provider)
+        await flush_pending_doc(ctx, elapsed, task_cost, model_label)
         block = deliverables_block(ctx)
         text = (text.rstrip() + ("\n\n" + block if block else "")) if block else text
         if not had_pending_doc and ctx.get("emit_terminal_progress"):   # flush_pending_doc already narrates totals when there WAS a pending doc
-            await ctx["emit_terminal_progress"]("aegis", f"Total time: {_fmt_elapsed(elapsed)}. Total cost: ${task_cost:.3f} ({provider}).")
-        return text.rstrip() + f"\n\n**Completed task in:** {_fmt_elapsed(elapsed)}. **Total cost:** ${task_cost:.3f}, **Model:** {provider}"
+            await ctx["emit_terminal_progress"]("aegis", f"Total time: {_fmt_elapsed(elapsed)}. Total cost: ${task_cost:.3f} ({model_label}).")
+        return text.rstrip() + f"\n\n**Completed task in:** {_fmt_elapsed(elapsed)}. **Total cost:** ${task_cost:.3f}, **Model:** {model_label}"
     try:
         for _round_no in range(MAX_ROUNDS):
             # Checked ONLY here -- a clean round boundary, never mid-round -- because every assistant message with
@@ -280,6 +281,14 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
             ctx["session_cost_usd"] += round_cost
             tok_in += usage.get("input_tokens", 0)
             tok_out += usage.get("output_tokens", 0)
+            if usage.get("model"):
+                # The real model id this round actually used (e.g. "muse-wonder-1.0"), NOT just the provider name ("muse") --
+                # real bug found live 2026-10-30: every "Model:" line (chat footer, terminal narration, Word report footer) said
+                # "muse" regardless of which of the 3 dropdown choices (Spark Contributor/Spark/Wonder) was actually running,
+                # because all three share one provider. Kept up to date every round since model_override can change mid-session
+                # (the dropdown, or the fail-closed contributor downgrade) -- the LAST round's real model is what the closing
+                # lines should report.
+                ctx["last_model_used"] = usage["model"]
             turnlog.log("round", sid=sid, turn=turn_id, n=rounds, model=usage.get("model", ""), in_tok=usage.get("input_tokens", 0),
                         out_tok=usage.get("output_tokens", 0), cost_usd=round(round_cost, 5), llm_s=round(round_llm_s, 2), text_chars=len(text or ""),
                         tools=[c["name"] for c in calls])
