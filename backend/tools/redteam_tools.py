@@ -357,16 +357,25 @@ async def check_scanner_versions(args: dict, ctx: dict) -> str:
         return json.dumps({"ok": False, "error": f"version check failed: HTTP {r.status_code}"})
 
     data = r.json()
-    # Attached to the result itself (not just a system-prompt instruction) so the exact reporting shape travels
-    # with the data on every call, not just the ones the old automatic greeting used to cover -- found missing
-    # live 2026-10-30 after that greeting was shortened: an ad-hoc call reported "Semgrep (update available)"
-    # with no version numbers at all, giving the operator no sense of how far behind it actually is.
-    data["note"] = ("For EVERY tool, report its real current version. For any tool whose status is not 'latest' or "
-                     "'system-managed', you MUST also name the real latest version, in this exact shape: "
-                     "'<name> <current> -> <latest> available' (e.g. 'Semgrep 1.182.1 -> 1.183.0 available') -- "
-                     "never just 'update available' with no version numbers. For a tool that IS 'latest'/"
-                     "'system-managed', '<name> <current> (latest)' is enough. Use the real current/latest values "
-                     "from this result exactly, never invent or round them.")
+    # outdated_count/outdated_tools are computed by CODE, from the same list the model is about to read -- a
+    # number for it to count its own reported lines against, the same "exact tally it must copy, never recount
+    # or guess" pattern _tally() uses for scan findings elsewhere in this file. Found live 2026-10-30, right after
+    # the automatic greeting was shortened: a prose-only instruction (no computed count to check against) reported
+    # just the FIRST outdated tool with no version numbers at all when only one happened to be behind -- a plain
+    # "report every outdated tool" instruction is easy to silently satisfy with one tool and still read as complete.
+    outdated = [t for t in data.get("tools", []) if t.get("status") not in ("latest", "system-managed")]
+    data["outdated_count"] = len(outdated)
+    data["outdated_tools"] = [t.get("name") for t in outdated]
+    data["note"] = (
+        f"outdated_count is {len(outdated)} ({data['outdated_tools']}) -- computed by code from this SAME result, "
+        "not your own count. Your reply MUST list EVERY tool from `tools`, one per line, in the order given. For "
+        "EACH of the outdated_count tool(s) in outdated_tools (there may be more than one -- list ALL of them, "
+        "never only the first), write BOTH real version numbers in this exact shape: "
+        "'<name> <current> -> <latest> available' (e.g. 'Semgrep 1.182.1 -> 1.183.0 available') -- never just "
+        "'update available' with no version numbers, and never skip any tool in outdated_tools. For every other "
+        "tool (status 'latest' or 'system-managed'), '<name> <current> (latest)' is enough. Use the real "
+        "current/latest values from this result exactly, never invent, round or recall them from memory."
+    )
     return json.dumps(data)
 
 
