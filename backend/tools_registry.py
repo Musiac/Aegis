@@ -188,8 +188,20 @@ TOOL_SCHEMAS = [
     {
         "name": "check_scanner_versions",
         "description": "Checks if security scanning tools (gitleaks, Bandit, Semgrep, pip-audit, Trivy, OWASP ZAP, npm) have updates available. "
-                        "Call this ONCE during your initial greeting to show tool recency status. Returns current vs latest version for each tool.",
+                        "Call this whenever the operator asks for it (no longer automatic at startup). Returns current vs latest version for "
+                        "each tool -- current is always queried live, so this reflects reality even right after update_scanner_tools runs.",
         "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "update_scanner_tools",
+        "description": "Actually upgrades the named outdated scanner tool(s) to their real latest release, live, for the rest of this "
+                        "session (it does NOT survive a container restart/recreate -- say so honestly if asked). Only call this AFTER the "
+                        "operator has explicitly said yes to an update you offered -- never on your own initiative. tools must be real names "
+                        "from check_scanner_versions's own outdated_tools list, never invented or guessed. Re-checks and returns the final "
+                        "real versions itself, so call check_scanner_versions again only if you need a check with nothing else happening.",
+        "parameters": {"type": "object", "properties": {
+            "tools": {"type": "array", "items": {"type": "string"}, "description": "Exact tool names from outdated_tools, e.g. [\"semgrep\", \"gitleaks\"]."},
+        }, "required": ["tools"]},
     },
 ]
 
@@ -205,6 +217,7 @@ DISPATCH = {
     "pentest_zap": redteam_tools.pentest_zap,
     "pentest_lateral_movement": redteam_tools.pentest_lateral_movement,
     "check_scanner_versions": redteam_tools.check_scanner_versions,
+    "update_scanner_tools": redteam_tools.update_scanner_tools,
     "pentestlive_consent": pentest_tools.pentestlive_consent,
     "pentestlive_scan": pentest_tools.pentestlive_scan,
     "verify_sandbox_safety": sandbox_verify.verify_sandbox_safety,

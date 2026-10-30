@@ -513,7 +513,7 @@ async def _zap_start():
     if _zap_proc["p"] and _zap_proc["p"].poll() is None:
         return
     _zap_proc["p"] = subprocess.Popen(
-        ["/opt/zap/zap.sh", "-daemon", "-port", str(ZAP_PORT), "-host", "127.0.0.1", "-dir", ZAP_HOME, "-config", f"api.key={ZAP_API_KEY}",
+        [_ACTIVE_ZAP["sh"], "-daemon", "-port", str(ZAP_PORT), "-host", "127.0.0.1", "-dir", ZAP_HOME, "-config", f"api.key={ZAP_API_KEY}",
          "-config", "api.addrs.addr.name=127.0.0.1", "-config", "api.addrs.addr.regex=false", "-config", "api.disablekey=false"],
         cwd=ZAP_HOME, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     async with httpx.AsyncClient(timeout=5) as c:
@@ -796,16 +796,186 @@ async def _check_npm_version() -> dict:
         return {"name": "npm", "current": "unknown", "latest": None, "status": "error"}
 
 
+# --- Live, same-session tool update (added 2026-10-30) ---
+# This container's root filesystem is READ-ONLY and it runs as a non-root user (redteam/Dockerfile) -- a real
+# security boundary, same spirit as the sandbox's own --network none. But HOME=/tmp here, and /tmp IS a real
+# writable+exec tmpfs (already how ZAP_HOME/_zap_proc work) -- `pip install --user` and a fresh binary download
+# both land there, never touching the read-only root at all. This genuinely upgrades what this RUNNING container
+# uses for the rest of its life; it does NOT touch the baked-in image, so a container restart/recreate reverts to
+# whatever redteam/Dockerfile still pins -- Aegis is told to say so honestly, never imply this survives a restart.
+_USER_BIN = os.path.join(os.environ.get("HOME", "/tmp"), ".local", "bin")
+_ACTIVE_ZAP = {"sh": "/opt/zap/zap.sh", "version": "v2.17.0"}   # no cheap `--version` without starting the whole
+                                                                  # daemon, so the live-updated version is tracked
+                                                                  # here instead of queried fresh each time
+
+
+def _ensure_user_bin_on_path() -> None:
+    os.makedirs(_USER_BIN, exist_ok=True)
+    if _USER_BIN not in os.environ.get("PATH", "").split(":"):
+        os.environ["PATH"] = _USER_BIN + ":" + os.environ.get("PATH", "")
+
+
+async def _live_cli_version(cmd: list, pattern: str, fallback: str) -> str:
+    """The REAL version of whatever `cmd` resolves to on PATH right now -- so a re-check after a live update
+    reflects what actually changed, never a baked-in pin that a real upgrade just made stale."""
+    try:
+        code, out = _run(cmd, timeout=10)
+        m = re.search(pattern, out)
+        if code == 0 and m:
+            return m.group(1)
+    except Exception:
+        pass
+    return fallback
+
+
+def _dpkg_arch() -> str:
+    code, out = _run(["dpkg", "--print-architecture"], timeout=5)
+    return out.strip() if code == 0 else "arm64"
+
+
+async def _update_pip_tool(name: str) -> dict:
+    _ensure_user_bin_on_path()
+    version_check = {"bandit": (["bandit", "--version"], r"bandit\s+([\d.]+)"),
+                      "semgrep": (["semgrep", "--version"], r"([\d.]+)"),
+                      "pip-audit": (["pip-audit", "--version"], r"pip-audit\s+([\d.]+)")}[name]
+    from_version = await _live_cli_version(*version_check, "?")
+    code, out = _run(["pip", "install", "--user", "--upgrade", "--no-cache-dir", name], timeout=180)
+    if code != 0:
+        return {"name": name, "ok": False, "from": from_version, "to": None, "error": out[-400:]}
+    to_version = await _live_cli_version(*version_check, "?")
+    return {"name": name, "ok": True, "from": from_version, "to": to_version}
+
+
+async def _update_github_binary(name: str, repo: str, extract_member: str) -> dict:
+    """gitleaks/trivy: single static binary, same release-tarball shape redteam/Dockerfile already uses at build
+    time -- downloaded here into _USER_BIN (ahead of /usr/local/bin on PATH once _ensure_user_bin_on_path runs),
+    so every later subprocess call to the bare command name picks up the new one with no other code change."""
+    _ensure_user_bin_on_path()
+    rel = await _check_github_release(repo, "")
+    latest = rel.get("latest")
+    if not latest:
+        return {"name": name, "ok": False, "from": None, "to": None, "error": "could not reach GitHub to find the latest release"}
+    arch_raw = _dpkg_arch()
+    arch = {"gitleaks": {"arm64": "arm64", "amd64": "x64"}, "trivy": {"arm64": "ARM64", "amd64": "64bit"}}[name].get(arch_raw)
+    if not arch:
+        return {"name": name, "ok": False, "from": None, "to": None, "error": f"unsupported architecture {arch_raw!r}"}
+    ver_num = latest.lstrip("v")
+    url = {"gitleaks": f"https://github.com/{repo}/releases/download/{latest}/gitleaks_{ver_num}_linux_{arch}.tar.gz",
+           "trivy": f"https://github.com/{repo}/releases/download/{latest}/trivy_{ver_num}_Linux-{arch}.tar.gz"}[name]
+    dest_tar = os.path.join(tempfile.gettempdir(), f"{name}_update_{uuid.uuid4().hex}.tar.gz")
+    try:
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as c:
+            r = await c.get(url)
+            if r.status_code != 200:
+                return {"name": name, "ok": False, "from": None, "to": None, "error": f"download failed: HTTP {r.status_code}"}
+            with open(dest_tar, "wb") as f:
+                f.write(r.content)
+        code, raw = _run(["tar", "-xzf", dest_tar, "-C", _USER_BIN, extract_member], timeout=30)
+        if code != 0:
+            return {"name": name, "ok": False, "from": None, "to": None, "error": f"extract failed: {raw[:300]}"}
+        os.chmod(os.path.join(_USER_BIN, extract_member), 0o755)
+    finally:
+        try:
+            os.remove(dest_tar)
+        except OSError:
+            pass
+    return {"name": name, "ok": True, "from": None, "to": latest}
+
+
+async def _update_zap() -> dict:
+    """Same official-distribution tarball Dockerfile uses at build time, extracted fresh into its own /tmp dir;
+    _ACTIVE_ZAP is updated only once the new install is verified present, and _zap_start() (see there) always
+    reads _ACTIVE_ZAP["sh"] rather than a hardcoded path, so a live update takes effect on the NEXT scan without
+    needing anything else changed."""
+    rel = await _check_github_release("zaproxy/zaproxy", "")
+    latest = rel.get("latest")
+    if not latest:
+        return {"name": "zaproxy", "ok": False, "from": None, "to": None, "error": "could not reach GitHub to find the latest release"}
+    ver_num = latest.lstrip("v")
+    new_home = os.path.join(tempfile.gettempdir(), f"zap_install_{uuid.uuid4().hex}")
+    os.makedirs(new_home, exist_ok=True)
+    dest_tar = os.path.join(tempfile.gettempdir(), f"zap_update_{uuid.uuid4().hex}.tar.gz")
+    try:
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as c:
+            r = await c.get(f"https://github.com/zaproxy/zaproxy/releases/download/{latest}/ZAP_{ver_num}_Linux.tar.gz")
+            if r.status_code != 200:
+                return {"name": "zaproxy", "ok": False, "from": None, "to": None, "error": f"download failed: HTTP {r.status_code}"}
+            with open(dest_tar, "wb") as f:
+                f.write(r.content)
+        code, raw = _run(["tar", "-xzf", dest_tar, "-C", new_home, "--strip-components=1"], timeout=60)
+        if code != 0:
+            return {"name": "zaproxy", "ok": False, "from": None, "to": None, "error": f"extract failed: {raw[:300]}"}
+        new_sh = os.path.join(new_home, "zap.sh")
+        if not os.path.isfile(new_sh):
+            return {"name": "zaproxy", "ok": False, "from": None, "to": None, "error": "downloaded archive did not contain zap.sh"}
+        os.chmod(new_sh, 0o755)
+    finally:
+        try:
+            os.remove(dest_tar)
+        except OSError:
+            pass
+    old_version = _ACTIVE_ZAP["version"]
+    _ACTIVE_ZAP["sh"], _ACTIVE_ZAP["version"] = new_sh, latest
+    if _zap_proc["p"] and _zap_proc["p"].poll() is None:   # a currently-running ZAP is still the OLD binary -- stop it so
+        _zap_proc["p"].terminate()                          # the next _zap_start() launches fresh with the new one
+        _zap_proc["p"] = None
+    return {"name": "zaproxy", "ok": True, "from": old_version, "to": latest}
+
+
+_UPDATABLE = {"bandit", "semgrep", "pip-audit", "gitleaks", "trivy", "zaproxy"}
+
+
+class UpdateToolsReq(BaseModel):
+    tools: list[str]
+
+
+@app.post("/update_tools", dependencies=[Depends(_auth)])
+async def update_tools(r: UpdateToolsReq):
+    """Updates exactly the named tools, live, for the rest of THIS container's life (see the module comment
+    above for why /tmp is where this can safely happen without touching the read-only root). Never silently
+    skips a requested tool -- an unknown/non-updatable name (npm: status is already "system-managed" and never
+    offered; ZAP sub-add-ons aren't a thing this tracks) comes back as its own ok:false entry with a real reason,
+    same "never invent, always say what actually happened" discipline as every scan result. Finishes by
+    re-running the exact same check scanner_versions() does, so the caller never has to guess whether a
+    just-updated tool's OWN version check is now using the new binary or the old one."""
+    attempted = []
+    for name in r.tools:
+        name = str(name).strip()
+        if name not in _UPDATABLE:
+            attempted.append({"name": name, "ok": False, "from": None, "to": None,
+                               "error": "not a tool this endpoint can update (not in the known scanner set, or it's system-managed like npm)"})
+            continue
+        if name in ("bandit", "semgrep", "pip-audit"):
+            attempted.append(await _update_pip_tool(name))
+        elif name == "gitleaks":
+            attempted.append(await _update_github_binary("gitleaks", "gitleaks/gitleaks", "gitleaks"))
+        elif name == "trivy":
+            attempted.append(await _update_github_binary("trivy", "aquasecurity/trivy", "trivy"))
+        elif name == "zaproxy":
+            attempted.append(await _update_zap())
+    recheck = await scanner_versions()
+    return {"ok": True, "attempted": attempted, "versions": recheck}
+
+
 @app.get("/scanner_versions", dependencies=[Depends(_auth)])
 async def scanner_versions():
-    """Check current vs latest versions of all scanning tools. Called on page load to show tool recency status."""
+    """Check current vs latest versions of all scanning tools. current is queried LIVE from whatever binary is
+    actually on PATH right now (or _ACTIVE_ZAP for ZAP, which has no cheap --version check) -- never a hardcoded
+    build-time pin -- so this always reflects reality, including right after /update_tools runs."""
+    bandit_cur, semgrep_cur, audit_cur, gitleaks_cur, trivy_cur = await asyncio.gather(
+        _live_cli_version(["bandit", "--version"], r"bandit\s+([\d.]+)", "1.9.4"),
+        _live_cli_version(["semgrep", "--version"], r"([\d.]+)", "1.182.1"),
+        _live_cli_version(["pip-audit", "--version"], r"pip-audit\s+([\d.]+)", "2.10.1"),
+        _live_cli_version(["gitleaks", "version"], r"([\d.]+)", "8.30.1"),
+        _live_cli_version(["trivy", "--version"], r"Version:\s*([\d.]+)", "0.76.1"),
+    )
     tools = await asyncio.gather(
-        _check_pypi_version("bandit", "1.9.4"),
-        _check_pypi_version("semgrep", "1.182.1"),
-        _check_pypi_version("pip-audit", "2.10.1"),
-        _check_github_release("gitleaks/gitleaks", "v8.30.1"),
-        _check_github_release("aquasecurity/trivy", "v0.76.1"),
-        _check_github_release("zaproxy/zaproxy", "v2.17.0"),
+        _check_pypi_version("bandit", bandit_cur),
+        _check_pypi_version("semgrep", semgrep_cur),
+        _check_pypi_version("pip-audit", audit_cur),
+        _check_github_release("gitleaks/gitleaks", f"v{gitleaks_cur}"),
+        _check_github_release("aquasecurity/trivy", f"v{trivy_cur}"),
+        _check_github_release("zaproxy/zaproxy", _ACTIVE_ZAP["version"]),
         _check_npm_version(),
         return_exceptions=True,
     )

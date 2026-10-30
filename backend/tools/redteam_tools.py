@@ -375,6 +375,50 @@ async def check_scanner_versions(args: dict, ctx: dict) -> str:
         "'update available' with no version numbers, and never skip any tool in outdated_tools. For every other "
         "tool (status 'latest' or 'system-managed'), '<name> <current> (latest)' is enough. Use the real "
         "current/latest values from this result exactly, never invent, round or recall them from memory."
+        + ("" if not outdated else (
+            " Since outdated_count is greater than 0, end your reply by asking plainly: would the operator like you "
+            "to update the outdated tool(s) now? Mention this updates them live for the rest of THIS session only "
+            "(it does not survive a container restart). Only call update_scanner_tools if they say yes -- never on "
+            "your own initiative, and never for a tool not in outdated_tools."
+        ))
+    )
+    return json.dumps(data)
+
+
+async def update_scanner_tools(args: dict, ctx: dict) -> str:
+    """Actually upgrades the named tool(s), live, in the redteam container -- real pip installs / binary downloads
+    into its writable /tmp (see redteam/server.py's own module comment for why that's safe without touching its
+    read-only root), never a claim without a real action behind it. Only ever called after the operator said yes
+    to an update check_scanner_versions offered them."""
+    why = _gate()
+    if why:
+        return why
+    tools = args.get("tools") or []
+    if not isinstance(tools, list) or not tools:
+        return json.dumps({"ok": False, "error": "tools must be a non-empty list of real tool names from outdated_tools"})
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=5.0)) as c:   # a fresh pip install / binary download per tool, can genuinely take a while
+        r = await c.post(f"{URL}/update_tools", json={"tools": tools}, headers={"Authorization": f"Bearer {TOKEN}"})
+
+    if r.status_code != 200:
+        return json.dumps({"ok": False, "error": f"update failed: HTTP {r.status_code}"})
+
+    data = r.json()
+    attempted = data.get("attempted") or []
+    all_ok = bool(attempted) and all(a.get("ok") for a in attempted)
+    failed = [a.get("name") for a in attempted if not a.get("ok")]
+    data["note"] = (
+        "These are the exact, recorded results of a real update attempt just now, not a description -- report "
+        "EVERY tool in `attempted` by name, whether it succeeded (say its real 'from' -> 'to' versions) or failed "
+        "(say its real error, never invent one). "
+        + (
+            "Every tool updated cleanly: say plainly that all tools are updated and you're ready for the operator's task."
+            if all_ok else
+            f"At least one tool did NOT update cleanly ({failed}). Do not claim success for those -- state clearly that "
+            "the update was partial or failed for them, then report the REAL current vs latest from `versions.tools` "
+            "(the result of the automatic re-check this endpoint already ran) for whichever tools are still outdated, "
+            "and say you're ready for the operator's task anyway, using the existing versions."
+        )
     )
     return json.dumps(data)
 
