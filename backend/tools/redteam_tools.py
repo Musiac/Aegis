@@ -409,16 +409,14 @@ async def update_scanner_tools(args: dict, ctx: dict) -> str:
     all_ok = bool(attempted) and all(a.get("ok") for a in attempted)
     failed = [a.get("name") for a in attempted if not a.get("ok")]
     data["note"] = (
-        "These are the exact, recorded results of a real update attempt just now, not a description -- report "
-        "EVERY tool in `attempted` by name, whether it succeeded (say its real 'from' -> 'to' versions) or failed "
-        "(say its real error, never invent one). "
+        "These are the exact, recorded results of a real update attempt just now, not a description. "
         + (
-            "Every tool updated cleanly: say plainly that all tools are updated and you're ready for the operator's task."
+            "Every tool updated cleanly: reply with something short like \"Done. All updated. Ready for your next task.\""
             if all_ok else
-            f"At least one tool did NOT update cleanly ({failed}). Do not claim success for those -- state clearly that "
-            "the update was partial or failed for them, then report the REAL current vs latest from `versions.tools` "
-            "(the result of the automatic re-check this endpoint already ran) for whichever tools are still outdated, "
-            "and say you're ready for the operator's task anyway, using the existing versions."
+            f"At least one tool did NOT update cleanly ({failed}). Do not claim success for those -- name which tool(s) "
+            "failed and report the REAL current vs latest from `versions.tools` (the result of the automatic re-check "
+            "this endpoint already ran) for whichever are still outdated, then say you're ready for the operator's "
+            "task anyway, using the existing versions."
         )
     )
     return json.dumps(data)

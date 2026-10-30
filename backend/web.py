@@ -711,7 +711,7 @@ async def _run_greeting(ws, messages, ctx, on_text, on_tool_call, _total_cost_us
             report = "Checking my tool's recency:\n\n" + "\n".join(lines)
             if outdated:
                 names = ", ".join(f"{n} {v['current']} -> {v['latest']}" for n, v in outdated.items())
-                report += f"\n\n{names} -- would you like me to update {'it' if len(outdated) == 1 else 'them'} now? This is a real, permanent update -- it's written to this host's own `redteam_tool_updates/` folder, so it survives a container restart or recreate, not just this one session."
+                report += f"\n\n{names} -- would you like me to update {'it' if len(outdated) == 1 else 'them'} now?"
             await on_text(report)
             # So a later "yes, update it" has real context to act on -- the model sees this exact report and
             # question as its own earlier turn, the same way it would if it had generated the text itself.
