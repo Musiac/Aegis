@@ -356,7 +356,18 @@ async def check_scanner_versions(args: dict, ctx: dict) -> str:
     if r.status_code != 200:
         return json.dumps({"ok": False, "error": f"version check failed: HTTP {r.status_code}"})
 
-    return r.text
+    data = r.json()
+    # Attached to the result itself (not just a system-prompt instruction) so the exact reporting shape travels
+    # with the data on every call, not just the ones the old automatic greeting used to cover -- found missing
+    # live 2026-10-30 after that greeting was shortened: an ad-hoc call reported "Semgrep (update available)"
+    # with no version numbers at all, giving the operator no sense of how far behind it actually is.
+    data["note"] = ("For EVERY tool, report its real current version. For any tool whose status is not 'latest' or "
+                     "'system-managed', you MUST also name the real latest version, in this exact shape: "
+                     "'<name> <current> -> <latest> available' (e.g. 'Semgrep 1.182.1 -> 1.183.0 available') -- "
+                     "never just 'update available' with no version numbers. For a tool that IS 'latest'/"
+                     "'system-managed', '<name> <current> (latest)' is enough. Use the real current/latest values "
+                     "from this result exactly, never invent or round them.")
+    return json.dumps(data)
 
 
 async def cleanup_redteam_scratch(args: dict, ctx: dict) -> str:
