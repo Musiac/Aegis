@@ -691,11 +691,17 @@ async def ws_endpoint(ws: WebSocket):
 
             # Contributor + a CONFIRMED-private repo is a real "your data may train Meta's models" exposure the operator must actively
             # accept, not something that happens because contributor is simply the default (added 2026-10-30, the owner's own request).
-            # Gated here, before run_turn ever starts, not mid-turn -- repo_visibility is only known-private once a PRIOR turn already
-            # confirmed it (first turn on a brand-new private repo can't be warned about pre-emptively; core.run_turn's own fail-closed
-            # contributor gate -- unaffected by this dropdown -- still protects that first turn regardless). Only reached once we know
-            # NO turn is currently busy (see above) -- never ask this mid-task.
-            if variant.get("contributor") and ctx.get("repo_visibility") == "private" and not ctx.get("_contributor_private_ok"):
+            # Gated here, before run_turn ever starts, not mid-turn. Two ways this fires:
+            #   - ctx["_pending_private_clone_warning"]: the EARLY path (added 2026-10-30) -- redteam_clone_private_repo itself
+            #     refused to clone THIS round (see its own comment) the moment the model tried it, before any private code ever
+            #     left the operator's control, and the model relayed the warning in chat already. This confirm cycle is what
+            #     actually unblocks the NEXT attempt.
+            #   - ctx["repo_visibility"] == "private": the fallback path -- visibility only became known mid-turn some other way
+            #     (e.g. scanning "self"), so core.run_turn's own fail-closed check already downgraded that turn off Contributor
+            #     automatically (and narrated why); this just makes sure the NEXT turn's dropdown choice is confirmed too.
+            # Only reached once we know NO turn is currently busy (see above) -- never ask this mid-task.
+            if variant.get("contributor") and not ctx.get("_contributor_private_ok") and (
+                    ctx.get("_pending_private_clone_warning") or ctx.get("repo_visibility") == "private"):
                 await _send({"type": "warn", "text": "WARNING: You have chosen the Contributor (cheapest) model for this private repo "
                                                        "task. Your data may be used for Meta's training. Should I go ahead?"})
                 try:
@@ -720,6 +726,7 @@ async def ws_endpoint(ws: WebSocket):
                     await _send({"type": "done"})
                     continue
                 ctx["_contributor_private_ok"] = True   # sticky for the rest of THIS session once accepted -- never re-ask every turn
+                ctx.pop("_pending_private_clone_warning", None)
 
             try:
                 # Re-picked every turn, not cached: if the operator left the dropdown on "auto" (dropdown_choice=="")

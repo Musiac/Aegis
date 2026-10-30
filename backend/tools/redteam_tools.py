@@ -317,6 +317,19 @@ async def redteam_clone_private_repo(args: dict, ctx: dict) -> str:
         return json.dumps({"ok": False, "error": "Provide the repository URL"})
     if not token_file:
         return json.dumps({"ok": False, "error": "Provide the path to the token file"})
+    # Refuse BEFORE cloning, not after (added 2026-10-30, the operator's own request: warn as early as possible --
+    # ideally before any private code ever leaves the operator's control, ONLY falling back to a post-clone warning
+    # when visibility becomes known some other way, e.g. mid-turn via a scanner call on "self"). This is the one
+    # tool call that KNOWINGLY clones something private, so it is the one place a pre-clone refusal is possible at
+    # all -- redteam_clone_repo itself never clones a private repo (it just detects one and asks for a token file).
+    if ctx.get("force_model_override") == "muse-spark-1.3-contributor" and not ctx.get("_contributor_private_ok"):
+        ctx["_pending_private_clone_warning"] = True
+        return json.dumps({"ok": False, "error": "Do not clone this yet.",
+                            "note": "STOP here -- do not call redteam_clone_private_repo or any other tool this round. Tell the "
+                                    "operator, verbatim: \"WARNING: You have chosen the Contributor (cheapest) model for this "
+                                    "private repo task. Your data may be used for Meta's training. Should I go ahead?\" Then end "
+                                    "your turn and wait for their answer -- they will either confirm, or switch the model dropdown "
+                                    "to Standard/Wonder and resend the request."})
     await narrate(ctx, f"Now cloning {url} (private repo).")
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(130.0, connect=5.0)) as c:

@@ -263,6 +263,15 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
                     # didn't know the operator had just said yes). Still fail-closed for the CASE this flag doesn't cover: visibility
                     # flipping private for the first time this session, mid-turn, with no chance to have asked yet.
                     model_override = requested_model if provider != "muse" or ctx.get("repo_visibility") in ("public", None) or ctx.get("_contributor_private_ok") else ""
+                    if not model_override and not ctx.get("_contributor_downgrade_notified") and ctx.get("emit_terminal_progress"):
+                        # Right-after-cloning fallback warning (added 2026-10-30, the operator's own request): visibility just
+                        # became known private mid-turn (e.g. "self" or another non-public target), with no chance to ask
+                        # BEFORE this round -- the model is already silently downgraded off Contributor above, so there is no
+                        # further training-data exposure risk from here on, but the operator should still be told plainly what
+                        # just happened and why, not left to infer it from a quietly different model name in the cost line.
+                        ctx["_contributor_downgrade_notified"] = True
+                        await ctx["emit_terminal_progress"]("aegis", "This target turned out to be private -- switched off the "
+                                                             "Contributor model for the rest of this task so its data is never used for Meta's training.")
                 else:
                     model_override = requested_model
                 effort_override = ctx.get("force_reasoning_effort") or ""
