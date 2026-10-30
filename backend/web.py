@@ -103,10 +103,9 @@ MUSE_VARIANTS = [
     # exposes a CHOICE of these (added 2026-10-30) rather than the fully-automatic contributor/standard-only split core.run_turn used to
     # apply silently; the automatic fail-closed logic there is now the DEFAULT this dropdown starts on, not replaced by it -- an operator
     # can still override to Standard or Wonder for a task that needs more care or more intelligence than Spark's contributor tier gives.
-    {"id": "spark-contributor", "label": "Spark (Contributor — cheapest, public-repo data may train Meta's models)",
-     "model": "muse-spark-1.3-contributor", "contributor": True},
-    {"id": "spark", "label": "Spark (Standard)", "model": "muse-spark-1.3", "contributor": False},
-    {"id": "wonder", "label": "Wonder (higher intelligence, higher cost)", "model": "muse-wonder-1.0", "contributor": False},
+    {"id": "spark-contributor", "label": "Spark Contributor", "model": "muse-spark-1.3-contributor", "contributor": True},
+    {"id": "spark", "label": "Spark", "model": "muse-spark-1.3", "contributor": False},
+    {"id": "wonder", "label": "Wonder", "model": "muse-wonder-1.0", "contributor": False},
 ]
 DEFAULT_MUSE_VARIANT = "spark-contributor"
 
