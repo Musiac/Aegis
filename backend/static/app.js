@@ -268,11 +268,24 @@
         opt.textContent = `auto (scan: ${d.auto_route.scan} / fix: ${d.auto_route.fix})`;
         providerSelect.appendChild(opt);
       }
-      for (const p of d.providers) {
-        const opt = document.createElement("option");
-        opt.value = p;
-        opt.textContent = p;
-        providerSelect.appendChild(opt);
+      // muse_variants (added 2026-10-30): a real choice of WHICH Muse model/tier, not just "muse" -- Spark Contributor (cheapest,
+      // the safe default), Spark Standard, or Wonder (higher intelligence). The dropdown's value IS the variant id; web.py maps it
+      // back to the real model. Falls back to the old flat provider list if an older/different backend has no muse_variants at all.
+      if (d.muse_variants && d.muse_variants.length) {
+        for (const v of d.muse_variants) {
+          const opt = document.createElement("option");
+          opt.value = v.id;
+          opt.textContent = v.label;
+          if (v.id === d.default_muse_variant) opt.selected = true;
+          providerSelect.appendChild(opt);
+        }
+      } else {
+        for (const p of d.providers) {
+          const opt = document.createElement("option");
+          opt.value = p;
+          opt.textContent = p;
+          providerSelect.appendChild(opt);
+        }
       }
     } catch (e) {
       addTerminalLine(`[ui] could not load providers: ${e}`);
@@ -317,6 +330,14 @@
       } else if (msg.type === "error") {
         clearPendingDots();
         addChatMsg("error", msg.text);
+      } else if (msg.type === "warn") {
+        // Contributor model + a confirmed-private repo (added 2026-10-30): a real training-data-exposure warning the operator must
+        // actively accept or decline before the task continues -- shown in red (see .msg.warn in style.css), answered with a native
+        // confirm() dialog (simplest reliable yes/no here; the server is synchronously waiting on confirm_response either way).
+        clearPendingDots();
+        addChatMsg("warn", msg.text);
+        const ok = window.confirm(msg.text);
+        ws.send(JSON.stringify({ type: "confirm_response", confirm: ok }));
       } else if (msg.type === "cost") {
         // The FINAL value for this turn -- the server only ever sends this once run_turn has fully finished
         // accumulating every LLM round's real token cost, right before "done", so this always replaces the
@@ -339,8 +360,10 @@
     // "Aegis is thinking" placeholder is only shown when nothing was already in flight. The busy pill/dots stay
     // up either way since the ORIGINAL task is still genuinely running.
     if (!isBusy) setBusy(true);
-    // The dropdown is read on EVERY message, so changing it mid-session takes effect on the next task.
-    const payload = { type: "user_message", text, provider: providerSelect.value || "" };
+    // The dropdown is read on EVERY message, so changing it mid-session takes effect on the next task. Sent as BOTH provider (the
+    // legacy "auto"/raw-provider-name path, still meaningful if muse_variants wasn't offered) and muse_variant (the real Muse model/
+    // tier choice, added 2026-10-30) -- web.py only acts on whichever one actually applies.
+    const payload = { type: "user_message", text, provider: providerSelect.value || "", muse_variant: providerSelect.value || "" };
     ws.send(JSON.stringify(payload));
     input.value = "";
   });

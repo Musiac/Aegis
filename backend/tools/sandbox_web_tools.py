@@ -12,6 +12,7 @@ import httpx
 CONTROL_URL = "http://aegis-sandbox-web:7999"
 APP_HOST = "www.sandbox.com"
 APP_PORT = 8900
+STUB_PORT = 8901
 
 
 async def _call(path: str, body: dict = None) -> dict:
@@ -28,7 +29,12 @@ def _note(d: dict, verb: str) -> dict:
     if d.get("ok") and "project" in d:
         d["note"] = (f"The app is now reachable INSIDE the sandbox network at http://{APP_HOST}:{APP_PORT}/ -- use that exact address as "
                       f"pentest_zap's target_url. {verb} succeeded; report it plainly, including any 'error' field here even when ok is true "
-                      f"(e.g. it started but is not answering yet).")
+                      f"(e.g. it started but is not answering yet). A local OpenAI-compatible stub is already reachable at "
+                      f"http://{APP_HOST}:{STUB_PORT}/v1 -- the app's OPENAI_API_KEY/OPENAI_BASE_URL env vars were automatically pointed at "
+                      f"it (only when not already set to something real), so if its code calls the OpenAI SDK it gets a canned, schema-"
+                      f"valid reply (plain or streaming) instead of failing on a missing/unreachable key -- no action needed unless the app "
+                      f"hardcodes its own OpenAI client config and ignores those env vars, which you'd see as a startup/runtime error "
+                      f"mentioning OpenAI auth or connectivity despite the stub being up.")
     return d
 
 
@@ -46,11 +52,20 @@ async def sandbox_app_start(args: dict, ctx: dict) -> str:
     """Starts the REAL web server of a cloned (and possibly already-fixed) project, so pentest_zap has a live target at
     http://www.sandbox.com:8900/. project: the clone's name (from redteam_clone_repo/redteam_clone_private_repo's result), or "self". Stops
     whatever app was already running first -- only one runs at a time. Only works for a project shaped like Aegis's own convention
-    (backend/web.py, `uvicorn backend.web:app`) unless you pass cmd with an explicit start command for that project instead."""
+    (backend/web.py, `uvicorn backend.web:app`) unless you pass cmd with an explicit start command for that project instead.
+
+    Before launching, this installs the project's OWN declared dependencies (requirements.txt, or an editable install if it has a
+    pyproject.toml/setup.py instead) -- real pip install, real outbound internet, in the sandbox-web container (NOT the code sandbox).
+    This happens automatically; pass install=false only if you already know the project needs no install step (e.g. you just confirmed its
+    deps are already satisfied) and want to skip the time cost. The result's install_log field shows what pip actually did -- read it before
+    concluding why a start failed; a ModuleNotFoundError after this means the install itself failed or the module isn't declared in
+    requirements.txt/pyproject.toml, not that this step didn't run."""
     project = str(args.get("project") or "").strip()
     if not project:
         return json.dumps({"ok": False, "error": "Say which project to start (the clone's name, or \"self\")."})
-    result = _note(await _call("/start", {"project": project, "cmd": str(args.get("cmd") or "")}), "start")
+    install = args.get("install")
+    result = _note(await _call("/start", {"project": project, "cmd": str(args.get("cmd") or ""),
+                                           "install": True if install is None else bool(install)}), "start")
     _mark_running(ctx, project, bool(result.get("ok")))
     return json.dumps(result)
 
@@ -61,7 +76,9 @@ async def sandbox_app_restart(args: dict, ctx: dict) -> str:
     project = str(args.get("project") or "").strip()
     if not project:
         return json.dumps({"ok": False, "error": "Say which project to restart (the clone's name, or \"self\")."})
-    result = _note(await _call("/restart", {"project": project, "cmd": str(args.get("cmd") or "")}), "restart")
+    install = args.get("install")
+    result = _note(await _call("/restart", {"project": project, "cmd": str(args.get("cmd") or ""),
+                                             "install": True if install is None else bool(install)}), "restart")
     _mark_running(ctx, project, bool(result.get("ok")))
     return json.dumps(result)
 

@@ -127,9 +127,21 @@ async def _deliver(title: str, body: str, ctx: dict) -> str:
     emit_document = ctx.get("emit_document")
     if not emit_document:
         return json.dumps({"created": False, "error": "This session cannot show files."})
+    doc_b64 = base64.b64encode(data).decode("ascii")
     await emit_document({"kind": "docx", "filename": filename, "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                          "size": len(data), "data_base64": base64.b64encode(data).decode("ascii"),
+                          "size": len(data), "data_base64": doc_b64,
                           "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds") + "Z"})
+    # Also land this SAME report inside the project's already-exported zip, if one exists this session (added 2026-10-30, a real gap:
+    # the browser-delivered download above is the only copy of the report today -- a driver script or any client that doesn't persist
+    # the websocket's data_base64 payload loses the report entirely once the session closes, even though CHANGES.txt/the fixed code
+    # survives fine in the zip). Best-effort and silent on failure -- this must never block or alter the real delivery above.
+    last_export = ctx.get("last_export") or {}
+    if last_export.get("path"):
+        from .sandbox_tools import append_doc_to_export
+        try:
+            await append_doc_to_export(str(last_export["path"]), filename, doc_b64)
+        except Exception:                                                        # noqa: BLE001
+            pass
     from .sandbox_web_tools import ensure_stopped_after_report
     stop_note = await ensure_stopped_after_report(ctx)       # the one guaranteed point: a sandboxed app started earlier this turn is stopped HERE, in
                                                               # code, whatever the model did or didn't call itself (see sandbox_web_tools._mark_running)

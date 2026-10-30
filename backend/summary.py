@@ -53,8 +53,10 @@ def deliverables_block(ctx: dict) -> str:
         return ""
     host_dir = os.environ.get("AEGIS_OUT_HOST_DIR", OUT_HOST_DIR).rstrip("/")
     lines = ["**What I made**"]
-    if ctx.get("doc_made_turn") == ctx.get("turn_no"):
-        lines.append("- **Word report:** ready to download with the button above.")
+    doc_made_this_turn = ctx.get("doc_made_turn") == ctx.get("turn_no")
+    if doc_made_this_turn:
+        lines.append("- **Word report:** ready to download with the button above -- also saved INSIDE the zip below (added 2026-10-30), "
+                      "so it's never lost even if this download is never saved anywhere.")
     lines.append(f"- **Zip of the fixed code:** `{host_dir}/{ex['filename']}` -- on your Mac, outside the container, so it survives container restarts.")
     if ex.get("has_changes"):
         detail = f" ({ex['files']} file(s) changed, +{ex['plus']} / -{ex['minus']} lines)" if ex.get("files") is not None else ""

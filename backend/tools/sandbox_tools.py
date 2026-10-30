@@ -148,15 +148,66 @@ async def export_project(args: dict, ctx: dict) -> str:
             result["changes_file"] = "CHANGES.txt"
             result["note"] = f"Created {result.get('filename')} containing CHANGES.txt: a real unified diff of every changed file against the untouched clone ({line.replace('CHANGES_OK ', '')})."
         m = re.search(r"files=(\d+) plus=(\d+) minus=(\d+)", line or "")
-        # remembered for the closing message, which states where the zip is (see summary.deliverables_block)
-        ctx["last_export"] = {"filename": str(result.get("filename") or ""), "turn": ctx.get("turn_no"), "has_changes": bool(line),
+        # remembered for the closing message, which states where the zip is (see summary.deliverables_block) -- "path" (added 2026-10-30)
+        # additionally lets create_word_document append the report straight into THIS zip once it's built (doc_tools._deliver), so the
+        # report survives even when the live session's own browser-delivered download was never saved anywhere on disk.
+        ctx["last_export"] = {"filename": str(result.get("filename") or ""), "path": str(result.get("path") or ""),
+                              "turn": ctx.get("turn_no"), "has_changes": bool(line),
                               "files": int(m.group(1)) if m else None, "plus": int(m.group(2)) if m else None, "minus": int(m.group(3)) if m else None}
     return json.dumps(result)
+
+
+async def append_doc_to_export(zip_path: str, doc_filename: str, data_base64: str) -> dict:
+    """Appends an already-built .docx (as base64) into an EXISTING export zip sitting in /aegis_out (added 2026-10-30) -- called from
+    doc_tools._deliver right after a report is built, using ctx["last_export"]["path"] (export_project's own real zip path). This is the
+    ONLY way the report survives independent of whatever the live session's browser-side download did with it: a driver script that never
+    saves the websocket's data_base64 payload (a real gap hit live 2026-10-30 -- a finished run's report was only ever in the browser's
+    download card, never on any disk) still gets the report, inside the SAME zip CHANGES.txt already lives in. Backend-web has no mount
+    for /aegis_out at all, so this HAS to run inside the sandbox container, over the same exec socket bash_run/export_project already use,
+    not as a plain Python zipfile.write in this process. Best-effort: a failure here (e.g. the zip was already cleaned up) is reported but
+    never blocks the real, already-delivered emit_document from reaching the browser."""
+    if not zip_path or not re.fullmatch(r"[A-Za-z0-9._\-/]{1,300}", zip_path) or not zip_path.startswith("/aegis_out/"):
+        return {"ok": False, "error": "no valid export zip path to append into"}
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", doc_filename)[:120] or "report.docx"
+    code = (
+        "import base64, zipfile\n"
+        f"data = base64.b64decode({data_base64!r})\n"
+        f"with zipfile.ZipFile({zip_path!r}, 'a', zipfile.ZIP_DEFLATED) as z:\n"
+        f"    z.writestr({safe_name!r}, data)\n"
+        "print('APPEND_OK')\n"
+    )
+    out = _call("POST", "/run", {"kind": "python", "code": code, "name": "", "timeout": 20}, timeout=35)
+    if "APPEND_OK" in json.dumps(out):
+        return {"ok": True, "zip_path": zip_path, "doc_filename": safe_name}
+    return {"ok": False, "error": str(out)[:300]}
 
 
 async def repl_list(args: dict, ctx: dict) -> str:
     """Lists the scripts already saved in /REPL. Check this before writing new code."""
     return json.dumps(_call("GET", "/list", timeout=15))
+
+
+async def check_sandbox_capacity(args: dict, ctx: dict) -> str:
+    """Reports the sandbox's current scratch quota (repl_cap_mb), how much of it is already used (repl_used_scratch_mb -- real scratch only,
+    reusable pip/uv caches never count against this), and how much real free space the underlying volume has (volume_free_mb). Call this
+    BEFORE cloning any repo whose size you are not confident fits -- compare the repo's size (from redteam_check_repo_size) against
+    repl_cap_mb - repl_used_scratch_mb. If the repo would not fit, tell the user the exact numbers and ask whether to raise the quota (via
+    increase_sandbox_capacity) before cloning; never raise it yourself without the user saying yes."""
+    return json.dumps(_call("GET", "/health", timeout=15))
+
+
+async def increase_sandbox_capacity(args: dict, ctx: dict) -> str:
+    """Raises the sandbox's /REPL scratch quota to the given size in MB, persisted so it survives a container restart/recreate. ONLY call this
+    after the operator has explicitly agreed, in this conversation, to raise the limit for a specific oversized repo you warned them about via
+    check_sandbox_capacity/redteam_check_repo_size -- never on your own initiative, and never silently. Refuses (with a real error, never a
+    fabricated success) if the requested size would leave less than 10% of the volume's real free space as headroom."""
+    try:
+        mb = int(args.get("mb") or 0)
+    except (TypeError, ValueError):
+        return json.dumps({"ok": False, "error": "mb must be an integer number of megabytes"})
+    if mb <= 0:
+        return json.dumps({"ok": False, "error": "mb must be a positive integer"})
+    return json.dumps(_call("POST", "/set_cap", {"mb": mb}, timeout=15))
 
 
 _EDIT_ROOTS = ("/dynamic_target/", "/self_target/", "/REPL/work/")

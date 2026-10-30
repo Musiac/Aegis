@@ -128,19 +128,18 @@ Here is exactly which parts of Aegis are a Meta model call and which are a plain
 
 ## Run matrix: repeatability evidence
 
-Every row below is a timed run against the real backend.
+Every row below is a timed run against the real backend, driven through the live `/ws` chat API end to end (clone, static scan, dynamic/active pentest where a server exists, fix, re-verify, export, report) — 6 public repos across 3 sessions.
 
 | Date | Target | Phase | Wall time | Cost | Outcome |
 |---|---|---|---|---|---|
-| 2026-10-26 | [`usestrix/strix`](https://github.com/usestrix/strix) | Strix verification (run 1 of 3) | 3m 40s | $1.293 | Clean: gitleaks/Bandit/Semgrep/pip-audit/npm-audit all 0/0/0/0/0 |
-| 2026-10-28 | [`aws/sagemaker-python-sdk`](https://github.com/aws/sagemaker-python-sdk) | Early scan run | 4m 48s | $0.007 | Scanned only (gitleaks 7, Bandit 334, Semgrep 79, pip-audit 19, npm-audit 0) — the pre-guard turn-ends-early bug, named below |
-| 2026-10-28 | `self` (Aegis's own repo) | Full cycle incl. live ZAP | 1m 9s | $0.177 | Static clean + ZAP active scan (17 findings) → fixed → exported → reported |
-| 2026-10-29 | [`google/pica`](https://github.com/google/pica) | Repeatability run 1 | 53s | $0.029 | Fixed: 5 Bandit B113 → 0, exported, reported |
-| 2026-10-29 | [`microsoft/TokenEconomizer`](https://github.com/microsoft/TokenEconomizer) | Repeatability run 1 (pre-guard) | 20m 15s | $0.202 | **Stalled:** 55 findings triaged, 0 fixes applied, no export/report |
-| 2026-10-29 | [`aws/tools-for-devops-agent`](https://github.com/aws/tools-for-devops-agent) | Repeatability run 1 (pre-guard) | 27m 47s | $0.296 | **Stalled:** 80 findings triaged, 0 fixes applied, no export/report |
-| 2026-10-29 | `google/pica` | Repeatability run 2 (post-guard) | 53s | $0.023 | Fixed again, identical result — confirms the guard doesn't change a working run |
-| 2026-10-29 | `microsoft/TokenEconomizer` | Repeatability run 2 (post-guard) | 26m 32s | $0.349 | **Fixed:** guard fired once ("fixed but not exported"), then `export_project`/`create_word_document` ran — zip + Word report delivered |
-| 2026-10-29 | `aws/tools-for-devops-agent` | Repeatability run 2 (post-guard) | 46m 52s | $0.616 | **Fixed:** guard fired once ("never fixed"), then 1 `edit_file` + `export_project` + `create_word_document` — zip + Word report delivered |
+| 2026-10-30 (overnight) | [`usestrix/strix`](https://github.com/usestrix/strix) | Full clone + static + dynamic pentest + fix + export | 49m 46s | $0.779 | Static clean (0/0/0/0/0, was 2/0/6/19/6); ZAP active scan 21 → 6 findings, none exploitable; exported + reported |
+| 2026-10-30 (overnight) | [`google/pica`](https://github.com/google/pica) | Full clone + static fix + export (no dynamic — no cargo toolchain in sandbox) | 1m 16s | $0.039 | 5 Bandit B113 findings → 0; exported + reported |
+| 2026-10-30 (overnight) | [`microsoft/TokenEconomizer`](https://github.com/microsoft/TokenEconomizer) | Full clone + static fix + export | 3m 34s | $0.180 | All 5 static scanners → 0; exported + reported |
+| 2026-10-30 (overnight) | [`aws/tools-for-devops-agent`](https://github.com/aws/tools-for-devops-agent) | Full clone + static fix + export | 33m 55s | $0.384 | gitleaks/Bandit/Semgrep/pip-audit → 0; 7 low-severity npm findings left as-is (no published patch); exported + reported |
+| 2026-10-30 (morning rerun) | [`aws/sagemaker-python-sdk`](https://github.com/aws/sagemaker-python-sdk) | Full clone + static fix + export (model: muse-spark-1.3-contributor) | 87m 17s | $1.507 | gitleaks 7 → 0, Bandit 334 → 0, Semgrep 79 → 0, pip-audit 19 → 3 (remaining 3 genuinely blocked by an upstream `setuptools<82` constraint, not skipped); exported + reported |
+| 2026-10-30 (afternoon) | [`openai/openai-agents-python`](https://github.com/openai/openai-agents-python) | Full clone + static fix + **real dynamic/active pentest** + export (model: muse-wonder-1.0, reasoning effort: max) | 23m 19s | ≈$6.26 (see note) | gitleaks 9 → 0, Bandit 295 → 0, Semgrep 15 → 0; its own example FastAPI server was started for real, dependencies auto-installed, and ZAP's active scanner ran against it — 17 findings → fixed → re-verified at 13, all informational-only, no exploitable finding; 96 files changed (+471/-405); exported + reported |
+
+**Cost note on the Wonder row:** the live session displayed $0.000 (no verified per-token rate existed for `muse-wonder-1.0` at the time it ran). The real cost, reconstructed afterward from the session's logged token usage (8,026,481 input / 97,049 output tokens) and Meta's own published Muse Spark/Wonder rate card (`dev.meta.ai/docs/pricing-rate-limits`, verified live 2026-10-30) — $4.00/1M fresh input, **$0.20/1M cached input**, $20.00/1M output for Wonder — comes to ≈$6.26 at the 91.1% cache-hit rate Meta's own billing dashboard reported for this run (confirmed by the owner against a real ~$5 deduction from the hackathon credit). A long multi-round tool-calling session resends its whole growing conversation history every round, so a high cache-hit rate is expected and this is now priced correctly going forward (`backend/model_pricing.py`/`backend/llm.py` both fixed the same day this was caught — cached-input rates are now tracked for all 3 reasoning-tier models: `muse-wonder-1.0` ($0.20/1M cached), `muse-spark-1.3` ($0.15/1M cached), `muse-spark-1.3-contributor` ($0.002/1M cached). `muse-voice-transcribe-1.0`, the one voice model, has no cached-input concept on the same pricing page — it bills per second of audio, a separate line item from token usage entirely.
 
 All costs are metered Muse token cost for the whole conversation (every scan + every fix +
 the report), computed by `backend/model_pricing.py` from actual token usage.

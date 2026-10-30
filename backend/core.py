@@ -240,8 +240,29 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
                 # and verify_sandbox_safety fire here -- unscoped, no target/project, nothing sensitive could have been sent yet) --
                 # treat that the same as "public" for billing-tier purposes. It flips to "private" (sticky) the moment a scoped call
                 # actually names something not confirmed public, per the fail-closed logic below; from then on this condition is false.
-                model_override = ("muse-spark-1.3-contributor" if provider == "muse" and ctx.get("repo_visibility") in ("public", None) else "")
-                text, calls, usage = await chat(provider, messages, TOOL_SCHEMAS, model_override)
+                # ctx["force_model_override"] (added 2026-10-30): the real model-picker dropdown's choice (web.py's MUSE_VARIANTS), or a
+                # driver script forcing a specific model id directly (e.g. "muse-wonder-1.0" for testing). This is honoured for every
+                # NON-contributor choice unconditionally -- Standard and Wonder carry no training-data exposure, so there is nothing for
+                # the fail-closed check below to protect against. The CONTRIBUTOR model specifically still goes through the SAME
+                # fail-closed public/private gate as before, even when it's the operator's own chosen default: a mid-turn flip to a
+                # private target (a real incident this already caught once -- "self" scanned in the same session as a public clone)
+                # must still downgrade to Standard automatically, never silently stay on contributor just because that was selected.
+                # web.py's own confirm-before-continuing gate (asked once per session, before the turn even starts) is a SEPARATE,
+                # earlier check for a repo already known private when the operator picked contributor -- this is the backstop for
+                # visibility that was still unknown at that point and only resolved mid-turn.
+                requested_model = ctx.get("force_model_override") or ""
+                if requested_model == "muse-spark-1.3-contributor":
+                    # ctx["_contributor_private_ok"] (set by web.py once the operator explicitly answered yes to the red warning for
+                    # THIS session) means the training-data exposure was a real, accepted choice -- honour it, don't silently downgrade
+                    # to Standard anyway, or the whole confirmation prompt would be pointless theater (a real bug caught live
+                    # 2026-10-30: confirming "yes" still used muse-spark-1.3, never muse-spark-1.3-contributor, because this check
+                    # didn't know the operator had just said yes). Still fail-closed for the CASE this flag doesn't cover: visibility
+                    # flipping private for the first time this session, mid-turn, with no chance to have asked yet.
+                    model_override = requested_model if provider != "muse" or ctx.get("repo_visibility") in ("public", None) or ctx.get("_contributor_private_ok") else ""
+                else:
+                    model_override = requested_model
+                effort_override = ctx.get("force_reasoning_effort") or ""
+                text, calls, usage = await chat(provider, messages, TOOL_SCHEMAS, model_override, effort_override)
                 if any(c["name"] == "create_word_document" for c in calls):
                     filler.jump(_FILLER_DOC_STAGE)
                 else:
@@ -251,7 +272,8 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
                 raise
             round_llm_s = time.monotonic() - t0
             llm_s += round_llm_s
-            round_cost = compute_cost_usd(provider, usage.get("model", ""), usage.get("input_tokens", 0), usage.get("output_tokens", 0))
+            round_cost = compute_cost_usd(provider, usage.get("model", ""), usage.get("input_tokens", 0), usage.get("output_tokens", 0),
+                                           usage.get("cached_tokens", 0))
             ctx["session_cost_usd"] += round_cost
             tok_in += usage.get("input_tokens", 0)
             tok_out += usage.get("output_tokens", 0)

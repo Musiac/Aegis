@@ -261,6 +261,46 @@ async def check_repo_access(r: CheckRepoReq):
     return result
 
 
+async def _check_repo_size(url: str) -> dict:
+    """Real size of a github.com repo's git database, in KB, straight from the GitHub API's own `size` field on the repo object -- never
+    estimated, never cloned first just to measure. This is the full repo's size (GitHub does not expose a shallow-clone-size figure), so a
+    `--depth 1` clone (what clone_target actually does) is very often smaller than this for a repo with deep history -- note that honestly in
+    the result rather than implying this IS what a clone will use. Only github.com URLs are supported (the API this calls is GitHub-specific);
+    any other host returns ok:false with a plain reason, never a guess."""
+    m = re.search(r"github\.com[/:]([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$", url.strip())
+    if not m:
+        return {"ok": False, "error": "not a github.com URL -- repo size can only be checked via GitHub's own API"}
+    repo = f"{m.group(1)}/{m.group(2)}"
+    headers = {"Authorization": f"Bearer {GITHUB_CLONE_TOKEN}"} if GITHUB_CLONE_TOKEN else {}
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as c:
+            r = await c.get(f"https://api.github.com/repos/{repo}", headers=headers)
+    except Exception as e:                                                      # noqa: BLE001
+        return {"ok": False, "error": f"could not reach GitHub: {type(e).__name__}: {e}"}
+    if r.status_code == 404:
+        return {"ok": False, "error": f"{repo!r} not found (private without a working token, or a typo)"}
+    if r.status_code == 403 and r.headers.get("x-ratelimit-remaining") == "0":
+        reset = r.headers.get("x-ratelimit-reset")
+        return {"ok": False, "error": f"GitHub API rate limit reached (resets {reset})" + ("" if GITHUB_CLONE_TOKEN else " -- set GITHUB_CLONE_TOKEN to raise the limit")}
+    if r.status_code != 200:
+        return {"ok": False, "error": f"GitHub API returned HTTP {r.status_code}"}
+    data = r.json()
+    size_kb = int(data.get("size") or 0)
+    return {"ok": True, "repo": repo, "size_kb": size_kb, "size_mb": round(size_kb / 1024, 1),
+            "note": "size is the full git database (GitHub does not report shallow-clone size); a --depth 1 clone is often smaller, "
+                    "especially for a repo with long history, but can still be close to this for a repo with large tracked binaries/LFS."}
+
+
+@app.post("/check_repo_size", dependencies=[Depends(_auth)])
+async def check_repo_size(r: CheckRepoReq):
+    """Checks a github.com repo's real size via the GitHub API, with NO clone performed. Call this before clone_target for any repo you are
+    not already confident is small -- the result tells the caller whether it's likely to fit the sandbox's current /REPL scratch quota."""
+    url = r.url.strip()
+    if not re.match(r"^(https://|git@)[\w.-]+[:/][\w./-]+$", url):
+        raise HTTPException(status_code=400, detail="that does not look like a real git URL (https://... or git@...)")
+    return await _check_repo_size(url)
+
+
 @app.post("/clone_with_token", dependencies=[Depends(_auth)])
 async def clone_with_token(r: CloneWithTokenReq):
     """Clones a private git repo using a token read from a file path. The token is read once and not stored."""

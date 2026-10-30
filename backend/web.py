@@ -98,18 +98,33 @@ async def index():
     return HTMLResponse(html)
 
 
+MUSE_VARIANTS = [
+    # Every real Meta model this build may use -- all Muse family, consistent with the hackathon's Meta-model-only rule. The dropdown
+    # exposes a CHOICE of these (added 2026-10-30) rather than the fully-automatic contributor/standard-only split core.run_turn used to
+    # apply silently; the automatic fail-closed logic there is now the DEFAULT this dropdown starts on, not replaced by it -- an operator
+    # can still override to Standard or Wonder for a task that needs more care or more intelligence than Spark's contributor tier gives.
+    {"id": "spark-contributor", "label": "Spark (Contributor — cheapest, public-repo data may train Meta's models)",
+     "model": "muse-spark-1.3-contributor", "contributor": True},
+    {"id": "spark", "label": "Spark (Standard)", "model": "muse-spark-1.3", "contributor": False},
+    {"id": "wonder", "label": "Wonder (higher intelligence, higher cost)", "model": "muse-wonder-1.0", "contributor": False},
+]
+DEFAULT_MUSE_VARIANT = "spark-contributor"
+
+
 @app.get("/api/providers")
 async def providers():
     """The model dropdown's own data source. Aegis-specific (2026-10-27, forked from Aegis for the Meta Global Hackathon): this is a
-    Muse-Spark-only build -- "local" and "gpt" are deliberately removed from the offered list entirely, since the whole point of this fork
-    is to run on Meta's own model. Gemini/Claude stay usable via AEGIS_PROVIDER/the auto-route env vars even though they're not in
+    Muse-only build -- "local" and "gpt" are deliberately removed from the offered list entirely, since the whole point of this fork
+    is to run on Meta's own model(s). Gemini/Claude stay usable via AEGIS_PROVIDER/the auto-route env vars even though they're not in
     this list. "muse" is only offered once a real MUSE_API_KEY is configured, same gated-by-key pattern as every other provider -- never a
-    dead option. auto_route is set only when the operator's .env configures BOTH AEGIS_SCAN_PROVIDER and AEGIS_FIX_PROVIDER --
-    the frontend then offers an "auto" choice (empty provider string) that lets core.pick_provider route each message by its own wording,
-    whatever those two env vars name."""
+    dead option. muse_variants (added 2026-10-30) lets the dropdown offer a real choice of WHICH Muse model/tier within that one provider
+    -- see MUSE_VARIANTS' own comment. auto_route is set only when the operator's .env configures BOTH AEGIS_SCAN_PROVIDER and
+    AEGIS_FIX_PROVIDER -- the frontend then offers an "auto" choice (empty provider string) that lets core.pick_provider route each
+    message by its own wording, whatever those two env vars name."""
     avail = set(available_providers())
     scan_provider, fix_provider = scan_fix_providers()
     return {"providers": [p for p in ("muse",) if p in avail],
+            "muse_variants": MUSE_VARIANTS, "default_muse_variant": DEFAULT_MUSE_VARIANT,
             "auto_route": {"scan": scan_provider, "fix": fix_provider} if scan_provider else None}
 
 
@@ -624,6 +639,37 @@ async def ws_endpoint(ws: WebSocket):
                 continue
             if "provider" in msg:                      # the dropdown can change between tasks: honour the latest choice
                 dropdown_choice = str(msg.get("provider", "")).strip()
+            # muse_variant (added 2026-10-30): the real model-picker dropdown's choice, persisted across turns in ctx like
+            # dropdown_choice -- "spark-contributor"/"spark"/"wonder" (see MUSE_VARIANTS). Falls back to the safe default so an older
+            # client (or a driver script naming no variant) behaves exactly as before. "model"/"effort" are still accepted directly too
+            # (test-only driver-script path, e.g. forcing a reasoning effort MUSE_VARIANTS doesn't expose) and WIN over the variant's own
+            # model/effort if both are present in the same message.
+            if "muse_variant" in msg:
+                ctx["muse_variant"] = str(msg.get("muse_variant", "")).strip() or DEFAULT_MUSE_VARIANT
+            variant_id = ctx.get("muse_variant", DEFAULT_MUSE_VARIANT)
+            variant = next((v for v in MUSE_VARIANTS if v["id"] == variant_id), MUSE_VARIANTS[0])
+            ctx["force_model_override"] = str(msg.get("model", "")).strip() or variant["model"]
+            if "effort" in msg:
+                ctx["force_reasoning_effort"] = str(msg.get("effort", "")).strip()
+
+            # Contributor + a CONFIRMED-private repo is a real "your data may train Meta's models" exposure the operator must actively
+            # accept, not something that happens because contributor is simply the default (added 2026-10-30, the owner's own request).
+            # Gated here, before run_turn ever starts, not mid-turn -- repo_visibility is only known-private once a PRIOR turn already
+            # confirmed it (first turn on a brand-new private repo can't be warned about pre-emptively; core.run_turn's own fail-closed
+            # contributor gate -- unaffected by this dropdown -- still protects that first turn regardless).
+            if variant.get("contributor") and ctx.get("repo_visibility") == "private" and not ctx.get("_contributor_private_ok"):
+                await _send({"type": "warn", "text": "WARNING: You have chosen the Contributor (cheapest) model for this private repo "
+                                                       "task. Your data may be used for Meta's training. Should I go ahead?"})
+                try:
+                    raw2 = await asyncio.wait_for(ws.receive_text(), timeout=120.0)
+                    confirm_msg = json.loads(raw2)
+                except (asyncio.TimeoutError, ValueError):
+                    confirm_msg = {}
+                if not confirm_msg.get("confirm"):
+                    await _send({"type": "chat", "text": "Cancelled -- pick Standard or Wonder, or confirm, before I continue with this private repo."})
+                    await _send({"type": "done"})
+                    continue
+                ctx["_contributor_private_ok"] = True   # sticky for the rest of THIS session once accepted -- never re-ask every turn
 
             control = _control_word(text)
             busy_task = turn_state["task"]

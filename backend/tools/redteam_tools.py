@@ -73,15 +73,30 @@ def _finish(tool: str, data: dict, ctx: dict) -> dict:
     return data
 
 
-def _populate_working_copy(name: str) -> str:
-    """Right after a successful clone: copy the fresh pristine clone into the working copy the fixes are made in (and the static scanners re-scan).
-    This is a fixed command that only differs by <name>; leaving it to the model cost a full round (17 s) at the start of every fix run. Returns
-    a note for the model, or '' if it could not be done (the model then does it itself as before)."""
+def _populate_working_copy(name: str, ctx: dict = None, force: bool = False) -> str:
+    """Right after a successful clone: copy the fresh pristine clone into the working copy the fixes are made in (and the static scanners
+    re-scan). This is a fixed command that only differs by <name>; leaving it to the model cost a full round (17 s) at the start of every fix
+    run. Returns a note for the model, or '' if it could not be done (the model then does it itself as before).
+
+    GUARDED against re-wiping real fix progress (added 2026-10-30, real incident: mid-run on aws/sagemaker-python-sdk, after hitting a real
+    disk error, the model called redteam_clone_repo a second time for a name it had already been fixing for over an hour -- this unconditional
+    rm -rf/cp -r silently discarded every edit_file fix already applied, and bandit's count reverted from 1 back to 334 with no warning at all.
+    Now: if `name` is already marked populated in THIS session's ctx (set the first time this ever ran for it), the destructive repopulate is
+    SKIPPED and the existing working copy -- real fixes included -- is kept, unless `force=True` is explicitly passed (meaning the caller
+    asked for a genuine fresh reset, e.g. redteam_clone_repo was called with reset=true)."""
     from .sandbox_tools import _call as _sandbox_call
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", name or ""):
         return ""
+    populated = ctx.setdefault("dynamic_targets_populated", set()) if ctx is not None else None
+    if populated is not None and name in populated and not force:
+        return (f"NOTE: /dynamic_target/{name} already exists from an EARLIER clone this session and was NOT re-populated from pristine -- "
+                f"any fixes already applied to it are preserved. Re-scan/continue working on it as-is. If you genuinely need a fresh, "
+                f"unmodified copy (discarding any fixes already made), call redteam_clone_repo again with reset=true -- but that is a real, "
+                f"irreversible loss of whatever work is there now, so only do it if the operator asked for a clean restart.")
     out = _sandbox_call("POST", "/run", {"kind": "bash", "code": f"rm -rf /dynamic_target/{name} && cp -r /dynamic_pristine/{name} /dynamic_target/{name} && echo POPULATED", "name": "", "timeout": 30}, timeout=45)
     if "POPULATED" in json.dumps(out):
+        if populated is not None:
+            populated.add(name)
         tree = _source_tree(name)
         return (f"The working copy /dynamic_target/{name} is ALREADY populated from the fresh clone: do not run the cp yourself. "
                 f"Go straight to reading the files you need and scanning target {name!r}. "
@@ -116,13 +131,13 @@ def _source_tree(name: str, limit: int = 80) -> str:
     return text.split("TREE", 1)[1].strip() if "TREE" in text else ""
 
 
-def _with_populate(result_text: str) -> str:
+def _with_populate(result_text: str, ctx: dict = None, force: bool = False) -> str:
     try:
         d = json.loads(result_text)
     except ValueError:
         return result_text
     if isinstance(d, dict) and d.get("ok") and d.get("name"):
-        note = _populate_working_copy(str(d["name"]))
+        note = _populate_working_copy(str(d["name"]), ctx, force)
         if note:
             d["note"] = (str(d.get("note") or "") + " " + note).strip()
             d["working_copy_ready"] = True
@@ -154,6 +169,31 @@ async def redteam_trivy(args: dict, ctx: dict) -> str:
     return _gate() or json.dumps(_finish("trivy", await _call("trivy", str(args.get("target") or "")), ctx))
 
 
+async def redteam_check_repo_size(args: dict, ctx: dict) -> str:
+    """Checks a github.com repo's real size via GitHub's own API -- NO clone performed. Call this BEFORE redteam_clone_repo for any repo you
+    are not already confident is small. Then call check_sandbox_capacity (sandbox tool) to see the current /REPL quota and how much of it is
+    already used. If the repo's size_mb would not comfortably fit (quota minus already-used scratch), you MUST stop and tell the operator the
+    exact numbers (repo size, current quota, free headroom) and ask explicitly whether to raise the quota before cloning -- never clone
+    anyway and hope, and never raise the quota yourself without them saying yes. If they say yes, call increase_sandbox_capacity with a
+    reasonable size (comfortably above the repo's size_mb, but not wastefully large), then proceed with the clone. If they say no, stop this
+    task entirely and do not clone. Only github.com URLs are supported; for any other host, say plainly that size cannot be pre-checked and
+    ask the operator whether to proceed anyway, same spirit as the oversized-repo case."""
+    why = _gate()
+    if why:
+        return why
+    url = str(args.get("url") or "").strip()
+    if not url:
+        return json.dumps({"ok": False, "error": "Say which repo URL to check."})
+    async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as c:
+        r = await c.post(f"{URL}/check_repo_size", json={"url": url}, headers={"Authorization": f"Bearer {TOKEN}"})
+    if r.status_code != 200:
+        try:
+            return json.dumps({"ok": False, "error": r.json().get("detail") or f"HTTP {r.status_code}"})
+        except ValueError:
+            return json.dumps({"ok": False, "error": f"the size check answered HTTP {r.status_code}"})
+    return r.text
+
+
 async def redteam_clone_repo(args: dict, ctx: dict) -> str:
     """Clones a git repo (public or private) into the dynamic target pool so it can be scanned/fixed exactly like "self".
 
@@ -161,7 +201,14 @@ async def redteam_clone_repo(args: dict, ctx: dict) -> str:
     For PRIVATE repos: this will detect it's private and guide you through providing a GitHub Personal Access Token.
 
     Call this FIRST whenever the operator names a repo URL (not "self") -- it returns the target name to use for
-    every later redteam_*/bash_run/export_project call afterward."""
+    every later redteam_*/bash_run/export_project call afterward. If you have not already checked this repo's size with
+    redteam_check_repo_size + check_sandbox_capacity in THIS conversation, do that first -- a repo that doesn't fit the sandbox's current
+    scratch quota will fail mid-work (fixes already applied can be lost to a "/REPL is full" error) rather than failing cleanly up front.
+
+    If this exact repo was ALREADY cloned earlier in this conversation, calling this again does NOT wipe any fixes already applied to it --
+    the existing working copy (with its real fixes) is kept as-is, you're just told its name again. Pass reset=true ONLY if the operator
+    explicitly asked to discard existing work and start this repo completely fresh -- that genuinely and irreversibly throws away any fixes
+    already made to it."""
     why = _gate()
     if why:
         return why
@@ -187,7 +234,7 @@ async def redteam_clone_repo(args: dict, ctx: dict) -> str:
                 return json.dumps({"ok": False, "error": r.json().get("detail") or f"HTTP {r.status_code}"})
             except ValueError:
                 return json.dumps({"ok": False, "error": f"the clone server answered HTTP {r.status_code}"})
-        return _with_populate(r.text)
+        return _with_populate(r.text, ctx, force=bool(args.get("reset")))
 
     # Handle different error types
     error_type = check_result.get("error_type")
@@ -234,7 +281,9 @@ async def redteam_clone_private_repo(args: dict, ctx: dict) -> str:
     - url: The GitHub repository URL
     - token_file: Full path to a file containing your GitHub PAT (e.g., /home/ubuntu/token.txt)
 
-    The token is read once and not stored."""
+    The token is read once and not stored. If this exact repo/name was already cloned earlier in this conversation, calling this again does
+    NOT wipe any fixes already applied -- the existing working copy is kept. Pass reset=true only for a genuine, explicit, discard-and-start-
+    over request."""
     why = _gate()
     if why:
         return why
@@ -258,7 +307,7 @@ async def redteam_clone_private_repo(args: dict, ctx: dict) -> str:
         except ValueError:
             return json.dumps({"ok": False, "error": f"the clone server answered HTTP {r.status_code}"})
 
-    return _with_populate(r.text)
+    return _with_populate(r.text, ctx, force=bool(args.get("reset")))
 
 
 async def _call_zap_streaming(target_url: str, emit) -> dict:

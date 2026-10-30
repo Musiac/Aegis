@@ -43,7 +43,48 @@ DEFAULT_TIMEOUT, MAX_TIMEOUT = 20, 45
 MAX_OUTPUT = 12000                 # characters kept per stream
 MAX_CODE = 200_000
 MAX_CONCURRENT = int(os.getenv("REPL_MAX_CONCURRENT", "4"))
-REPL_CAP_BYTES = int(os.getenv("REPL_DIR_CAP_MB", "400")) * 1024 * 1024
+REPL_DEFAULT_CAP_MB = int(os.getenv("REPL_DIR_CAP_MB", "2048"))   # raised from 400 (2026-10-30) -- 400MB alone is smaller than a single modern
+                                                                     # repo's node_modules/venv, so real work routinely hit it; the host volume
+                                                                     # itself has hundreds of GB free, this was purely a soft app-level quota.
+REPL_CAP_MAX_MB = int(os.getenv("REPL_DIR_CAP_MAX_MB", "32768"))    # ceiling /set_cap will accept (32GB) -- a sanity bound, not a hard resource
+                                                                     # limit; still checked against real free disk space at request time.
+REPL_CAP_OVERRIDE_FILE = os.path.join(REPL_DIR, ".cap_override_mb")   # written by /set_cap, read fresh on every check -- persists in the SAME
+                                                                        # named volume as everything else in /REPL, so a raised cap survives a
+                                                                        # container recreate exactly like a live tool update does (redteam's
+                                                                        # /tool_updates pattern) with no env var / Dockerfile change needed.
+
+
+def _repl_cap_bytes() -> int:
+    """The cap currently in effect: an operator-raised override if one was ever written (via /set_cap), else REPL_DEFAULT_CAP_MB. Read fresh
+    every time (cheap, one small file) rather than cached, so a raise takes effect on the very next bash_run/repl_run with no restart."""
+    try:
+        with open(REPL_CAP_OVERRIDE_FILE, encoding="utf-8") as f:
+            mb = int(f.read().strip())
+        if mb > 0:
+            return mb * 1024 * 1024
+    except (OSError, ValueError):
+        pass
+    return REPL_DEFAULT_CAP_MB * 1024 * 1024
+
+
+DYNAMIC_TARGET_DIR = "/dynamic_target"   # a SEPARATE mount from /REPL (see docker inspect) -- a cloned repo's node_modules/venv/build artifacts
+                                           # land here, not under REPL_DIR, so they were NOT counted by the quota check at all until this fix
+                                           # (2026-10-30): a repo whose source is tiny but whose npm/pip dependency closure is huge could blow
+                                           # way past any /REPL cap while standing up a server for an active/dynamic scan, with nothing noticing.
+SELF_TARGET_DIR = "/self_target"         # same shape, for the "self" target's own working copy.
+
+
+def _scratch_bytes() -> int:
+    """Total real scratch across every directory a repo's own files/dependencies can grow under: /REPL (caches excluded, see
+    _dir_bytes_scratch) PLUS /dynamic_target and /self_target in full (a cloned repo's node_modules/.venv live here, not under /REPL, and are
+    real per-repo scratch, not a reusable cache -- nothing here is meant to be excluded)."""
+    total = _dir_bytes_scratch(REPL_DIR)
+    for d in (DYNAMIC_TARGET_DIR, SELF_TARGET_DIR):
+        if os.path.isdir(d):
+            total += _dir_bytes(d)
+    return total
+
+
 _slots = threading.BoundedSemaphore(MAX_CONCURRENT)
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
@@ -70,9 +111,15 @@ def _save_cwd(path: str) -> None:
 
 # HOME and UV_CACHE_DIR are deliberately FIXED, shared paths (not per-run): UV_CACHE_DIR exists to cache installed packages ACROSS runs, which a randomized path would defeat.
 # This is the sandbox's own private tmpfs, --network none, no other user or process ever shares it, so the usual "predictable /tmp path" attack does not apply here.
+# UV_CACHE_DIR moved from /tmp/uv-cache to /REPL/.uvcache (2026-10-30, real incident: /tmp is a RAM-backed tmpfs hard-capped at 1GB on this
+# host, and the uv cache plus HOME scratch grew past it across repeated sessions -- a genuine "No space left on device" (ENOSPC), not the
+# app-level /REPL quota -- which then made the model re-clone a repo it had already spent over an hour fixing, silently discarding every
+# applied fix (see _populate_working_copy's own guard against that). /REPL/.uvcache is the SAME directory .pkgs/.uvcache cleanup already
+# treats as a reusable cache (never wiped, see do_cleanup), backed by the much larger /REPL volume (hundreds of GB free) instead of a tiny
+# fixed-size tmpfs -- one cache, one consistent policy, moved onto storage that can actually hold it.
 USER_ENV = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": "/REPL/.pkgs:/opt/repl", "HOME": "/tmp/home",  # nosec B108
             "LANG": "C.UTF-8", "PYTHONUNBUFFERED": "1",
-            "UV_CACHE_DIR": "/tmp/uv-cache",  # nosec B108
+            "UV_CACHE_DIR": "/REPL/.uvcache",
             "UV_PYTHON_DOWNLOADS": "never", "UV_PYTHON": "/opt/base-venv/bin/python", "MPLBACKEND": "Agg",
             "HTTP_PROXY": "http://127.0.0.1:3128", "HTTPS_PROXY": "http://127.0.0.1:3128", "http_proxy": "http://127.0.0.1:3128", "https_proxy": "http://127.0.0.1:3128"}
 
@@ -94,6 +141,42 @@ def _dir_bytes(path: str) -> int:
             except OSError:
                 pass
     return total
+
+
+_CACHE_DIR_NAMES = {".pkgs", ".uvcache"}   # reusable install caches (pip/uv) -- never scratch, see do_cleanup's own comment. Excluded here too so
+                                             # their natural growth across sessions can never trip REPL_CAP_BYTES and brick bash_run/repl_run --
+                                             # a real incident, 2026-10-30: .uvcache alone grew past the whole 400MB cap from ordinary tool installs,
+                                             # and every bash_run (even `echo hi`) then failed closed, including the `rm` needed to free space --
+                                             # there was no way back in without an operator clearing it from outside the sandbox.
+
+
+def _dir_bytes_scratch(path: str) -> int:
+    """Same as _dir_bytes, but skips the top-level cache directories -- this is what REPL_CAP_BYTES should actually be measured against: real
+    scratch (saved scripts, /REPL/work, /REPL/tmp, dynamic_target clones), never the reusable caches do_cleanup also leaves alone."""
+    total = 0
+    for root, dirs, files in os.walk(path):
+        if root == path:
+            dirs[:] = [d for d in dirs if d not in _CACHE_DIR_NAMES]
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total
+
+
+_HOUSEKEEPING_BASH = re.compile(
+    r"^\s*(rm\s+-[a-z]*f[a-z]*\s|rm\s+-[a-z]*r[a-z]*f|du\s|df\s|df$|ls\s|ls$|find\s.*-delete)", re.I
+)
+
+
+def _is_repl_housekeeping(code: str) -> bool:
+    """True only for a bash command that is itself trying to inspect or free /REPL space (rm/du/df/ls/find -delete) -- the one class of command
+    that MUST be allowed to run even while /REPL is over its cap, or a full scratch disk becomes permanently unrecoverable from inside the
+    sandbox (the exact deadlock hit live 2026-10-30: `echo hi` and `rm -rf ...` were BOTH rejected by the same 507 this check exists to produce,
+    so clearing space required an operator stepping outside the sandbox entirely). Deliberately narrow -- this is not a general cap bypass, just
+    enough to let the model dig itself out."""
+    return bool(_HOUSEKEEPING_BASH.match(code))
 
 
 def _deny_setsid_seccomp():
@@ -185,6 +268,24 @@ def _kill_tree(root_pid: int, run_tag: str = "") -> None:
             pass
 
 
+_DISK_WATCH_POLL_S = 1.5
+_DISK_WATCH_HARD_MULTIPLIER = 1.5   # a single command (one npm/pip install) can write well past the cap during its own 45s-max run, before the
+                                      # NEXT call's pre-check would ever see it -- a real gap (2026-10-30): the pre-check alone cannot stop a
+                                      # one-shot dependency install from overshooting. This watcher polls real usage WHILE the command runs and
+                                      # kills it early if it blows past 1.5x the cap -- a hard ceiling, not just a value checked once at the start.
+
+
+def _watch_disk_cap(proc: subprocess.Popen, run_tag: str, hard_cap_bytes: int, stop: threading.Event, exceeded: threading.Event) -> None:
+    while not stop.wait(_DISK_WATCH_POLL_S):
+        try:
+            if _scratch_bytes() > hard_cap_bytes:
+                exceeded.set()
+                _kill_tree(proc.pid, run_tag)
+                return
+        except Exception:                                                     # noqa: BLE001 -- a watcher failure must never crash the real run
+            pass
+
+
 def run_command(argv: list, cwd: str, timeout: int, tool_token: str = "") -> dict:
     t0 = time.monotonic()
     run_tag = secrets.token_hex(8)     # tags every process this run spawns (inherited by descendants, survives setsid/reparenting) so cleanup
@@ -192,6 +293,9 @@ def run_command(argv: list, cwd: str, timeout: int, tool_token: str = "") -> dic
     env = dict(USER_ENV, REPL_TOOL_TOKEN=tool_token, REPL_RUN_TAG=run_tag) if tool_token else {**USER_ENV, "REPL_RUN_TAG": run_tag}
     proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             preexec_fn=_limits(timeout + 5))
+    stop_watch, cap_exceeded = threading.Event(), threading.Event()
+    watcher = threading.Thread(target=_watch_disk_cap, args=(proc, run_tag, int(_repl_cap_bytes() * _DISK_WATCH_HARD_MULTIPLIER), stop_watch, cap_exceeded), daemon=True)
+    watcher.start()
     timed_out = False
     try:
         out, err = proc.communicate(timeout=timeout)
@@ -204,10 +308,17 @@ def run_command(argv: list, cwd: str, timeout: int, tool_token: str = "") -> dic
             proc.kill()
             out, err = proc.communicate()
     finally:
+        stop_watch.set()
         _kill_tree(proc.pid, run_tag)                          # stragglers started in the background, including anything already reparented to init
     so, t1 = _clip(out)
     se, t2 = _clip(err)
-    return {"exit_code": proc.returncode, "stdout": so, "stderr": se, "timed_out": timed_out, "truncated": t1 or t2, "seconds": round(time.monotonic() - t0, 2)}
+    if cap_exceeded.is_set():
+        se = (se + "\n[REPL_CAP_EXCEEDED] This command was stopped because it filled the sandbox's scratch quota (dependency install likely "
+                    "too large for an active/dynamic scan). Free space with rm (e.g. node_modules, .venv, build artifacts for this repo), then "
+                    "fall back to static-scan-only results and fixes -- tell the operator plainly that the dynamic/active scan was skipped for "
+                    "this reason.").strip()
+    return {"exit_code": proc.returncode, "stdout": so, "stderr": se, "timed_out": timed_out, "truncated": t1 or t2,
+            "seconds": round(time.monotonic() - t0, 2), "repl_cap_exceeded": cap_exceeded.is_set()}
 
 
 def do_run(req: dict) -> tuple:
@@ -229,7 +340,7 @@ def do_run(req: dict) -> tuple:
                     return 400, {"error": "name may use letters, digits, dot, dash and underscore only"}
                 path = os.path.join(REPL_DIR, base + ".py")
                 if code:
-                    if _dir_bytes(REPL_DIR) > REPL_CAP_BYTES:
+                    if _scratch_bytes() > _repl_cap_bytes():
                         return 507, {"error": "/REPL is full; delete files with bash (rm) first"}
                     with open(path, "w") as f:
                         f.write(code)
@@ -247,7 +358,7 @@ def do_run(req: dict) -> tuple:
         else:
             if not code.strip():
                 return 400, {"error": "command is empty"}
-            if _dir_bytes(REPL_DIR) > REPL_CAP_BYTES:
+            if _scratch_bytes() > _repl_cap_bytes() and not _is_repl_housekeeping(code):
                 return 507, {"error": "/REPL is full; delete files with bash (rm) first"}
             start_cwd = _load_cwd()
             tag = f"{os.getpid()}.{threading.get_ident()}"
@@ -282,7 +393,6 @@ def do_run(req: dict) -> tuple:
 
 UPDATABLE_DIR = "/aegis_out"
 _ZIP_EXCLUDE = ["*/__pycache__/*", "*.pyc", "*/.pytest_cache/*", "*/.git/*"]
-DYNAMIC_TARGET_DIR = "/dynamic_target"     # sandbox-writable mirror of redteam's own CLONE_STAGING_DIR -- cleaned on its own side, see redteam/server.py's /cleanup_targets
 AEGIS_OUT_KEEP = 20                        # exported reports/zips to keep; /aegis_out otherwise grows forever, nothing ever deletes from it today
 
 
@@ -293,8 +403,34 @@ def do_cleanup(_req: dict) -> tuple:
     prior session), and /aegis_out beyond the newest AEGIS_OUT_KEEP exports (every finished export_project/create_word_document lands here and
     nothing has ever pruned it). /REPL/.pkgs and /REPL/.uvcache are deliberately left alone -- they are reusable install caches, not scratch,
     and wiping them would just force every future pip/npm install to redo real network work. Exempt from REPL_CAP_BYTES on purpose: this is the
-    one operation that must still work when /REPL is already full (that is exactly the state it exists to recover from)."""
+    one operation that must still work when /REPL is already full (that is exactly the state it exists to recover from).
+
+    ALSO clears /tmp/home's scratch contents (added 2026-10-30, same incident as the UV_CACHE_DIR move above): HOME=/tmp/home is a RAM-backed
+    tmpfs with a hard, small total cap shared with everything else under /tmp -- unlike /REPL's own quota (soft, app-level, hundreds of GB of
+    real headroom behind it), there is no recovering from THIS filling up except clearing it, so it gets wiped at the same deterministic,
+    once-per-session point as /REPL/work and /REPL/tmp."""
     freed = {}
+
+    home_dir = "/tmp/home"
+    before = _dir_bytes(home_dir) if os.path.isdir(home_dir) else 0
+    shutil.rmtree(home_dir, ignore_errors=True)
+    os.makedirs(home_dir, exist_ok=True)
+    freed["tmp/home"] = before
+
+    # Stray files/dirs written directly to /tmp by a bash_run command (confirmed live: /tmp/vtest, /tmp/b_full.json-style scratch) --
+    # anything here is from a PRIOR session (this runs before any bash_run in the new one), so it's safe to sweep unconditionally except the
+    # one structural entry (home) just recreated above.
+    tmp_stray_freed = 0
+    for entry in os.scandir("/tmp"):
+        if entry.name in ("home",):
+            continue
+        try:
+            size = _dir_bytes(entry.path) if entry.is_dir() else entry.stat().st_size
+            shutil.rmtree(entry.path, ignore_errors=True) if entry.is_dir() else os.remove(entry.path)
+            tmp_stray_freed += size
+        except OSError:
+            pass
+    freed["tmp/stray"] = tmp_stray_freed
 
     before = _dir_bytes(WORK_DIR) if os.path.isdir(WORK_DIR) else 0
     shutil.rmtree(WORK_DIR, ignore_errors=True)
@@ -415,6 +551,27 @@ def do_export(req: dict) -> tuple:
     return 200, result
 
 
+def do_set_cap(req: dict) -> tuple:
+    """Raises (or lowers) the /REPL scratch quota, persisted to REPL_CAP_OVERRIDE_FILE so it survives a container recreate. Only ever called
+    after the operator explicitly agreed to a larger limit (see redteam_check_repo_size's own docstring) -- never on the model's own initiative.
+    Refuses a value that would leave less than 10% of the volume's real free space headroom, so this can raise the quota but can't be used to
+    accidentally claim more than the host volume actually has."""
+    try:
+        mb = int(req.get("mb", 0))
+    except (TypeError, ValueError):
+        return 400, {"error": "mb must be an integer"}
+    if mb <= 0 or mb > REPL_CAP_MAX_MB:
+        return 400, {"error": f"mb must be between 1 and {REPL_CAP_MAX_MB}"}
+    free_bytes = shutil.disk_usage(REPL_DIR).free
+    requested_bytes = mb * 1024 * 1024
+    if requested_bytes > free_bytes * 0.9:
+        return 400, {"error": f"refusing: {mb}MB would leave less than 10% headroom on the volume "
+                               f"(free right now: {free_bytes // (1024 * 1024)}MB)"}
+    with open(REPL_CAP_OVERRIDE_FILE, "w", encoding="utf-8") as f:
+        f.write(str(mb))
+    return 200, {"ok": True, "cap_mb": mb, "free_bytes_before": free_bytes}
+
+
 def first_comment(path: str) -> str:
     try:
         with open(path, errors="replace") as f:
@@ -445,7 +602,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         if u.path == "/health":
-            return self._send(200, {"ok": True, "python": os.popen("/opt/base-venv/bin/python -V").read().strip(), "slots": MAX_CONCURRENT})
+            free = shutil.disk_usage(REPL_DIR).free
+            return self._send(200, {"ok": True, "python": os.popen("/opt/base-venv/bin/python -V").read().strip(), "slots": MAX_CONCURRENT,
+                                     "repl_cap_mb": _repl_cap_bytes() // (1024 * 1024), "repl_used_scratch_mb": _dir_bytes_scratch(REPL_DIR) // (1024 * 1024),
+                                     "volume_free_mb": free // (1024 * 1024)})
         if u.path == "/list":
             files = []
             for n in sorted(os.listdir(REPL_DIR)):
@@ -463,12 +623,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path not in ("/run", "/export", "/cleanup"):
+        if path not in ("/run", "/export", "/cleanup", "/set_cap"):
             return self._send(404, {"error": "not found"})
         try:
             req = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
             if path == "/cleanup":
                 status, body = do_cleanup(req)
+            elif path == "/set_cap":
+                status, body = do_set_cap(req)
             else:
                 status, body = do_export(req) if path == "/export" else do_run(req)
         except Exception as e:

@@ -151,6 +151,7 @@ section {
 #chat .msg.user { color: var(--text); font-weight: 600; }
 #chat .msg.assistant { color: var(--text); }
 #chat .msg.error { color: var(--error); font-family: Menlo, monospace; font-size: 12.5px; }
+#chat .msg.warn { color: var(--error); font-weight: 700; border: 1px solid var(--error); border-radius: 6px; padding: 8px 10px; background: color-mix(in srgb, var(--error) 10%, transparent); }
 .doc-card {
   display: flex;
   align-items: center;

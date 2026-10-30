@@ -7,6 +7,10 @@
 #   web -- the browser UI, a real daemon on :8900:
 #     docker run -d --name aegis-backend --network host -v aegis-sock:/sock --env-file .env --restart unless-stopped aegis-backend:latest web
 FROM python:3.12-slim
+# nodejs/npm (added 2026-10-30): this image is ALSO reused, unmodified, as sandbox-web's own runtime (sandbox_web/control.py's
+# _install_deps) to install a cloned project's own npm dependencies before starting an npm/React/etc. UI, the same way it already
+# installs Python deps via pip -- harmless addition to the real aegis-backend-web container too, just unused binaries there.
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt

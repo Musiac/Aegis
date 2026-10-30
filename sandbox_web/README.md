@@ -29,6 +29,19 @@ own `uvicorn backend.web:app --port 8900` as a tracked child process.
   backend, to call the control API). It has the SAME network exposure the redteam
   container has always had (outbound internet, for `pip install` etc. during the app's
   own startup) — not a new attack surface class.
+- **Local OpenAI stub** (added 2026-10-30): a second stdlib HTTP server in the SAME
+  process, on port 8901 (so also reachable at `http://www.sandbox.com:8901/v1`, no new
+  container, no DNS/hosts change). Answers `POST /v1/chat/completions` and
+  `/v1/completions` — plain or streaming — with a fixed, schema-valid canned reply, and
+  `GET /v1/models`. `_start()` sets `OPENAI_API_KEY`/`OPENAI_BASE_URL` for the launched
+  app via `env.setdefault(...)` — only when the real environment doesn't already define
+  them, so a genuinely configured key is never overridden. This exists so a cloned app
+  that needs the OpenAI API to do anything useful can still come up far enough for ZAP to
+  attack its real routes, without needing real credentials or outbound internet. Redirects
+  via `OPENAI_BASE_URL` rather than DNS-hijacking `api.openai.com` on purpose: the real
+  hostname is HTTPS-only and a self-signed cert for it would fail verification in any SDK
+  that checks it; a plain-HTTP custom base URL has no such problem and is the officially
+  supported override in both the Python and Node `openai` SDKs.
 - **Scope:** works for anything shaped like Aegis's own convention
   (`backend/web.py`, `uvicorn backend.web:app`) — which is exactly right for pentesting
   Aegis's own cloned code. A differently-shaped project needs an explicit `cmd`
@@ -46,13 +59,26 @@ docker run -d --name aegis-sandbox-web \
   -v "$(pwd)/sandbox_web/control.py:/control/control.py:ro" \
   -v "$(pwd)/dynamic_target:/dynamic_target:ro" \
   -v "$(pwd)/self_target:/self_target:ro" \
+  -v "$(pwd)/sandbox_web/pip_cache:/pip_cache" \
+  -v "$(pwd)/sandbox_web/npm_cache:/npm_cache" \
   --entrypoint python3 \
   aegis-backend:latest -u /control/control.py
 ```
 
+`pip_cache/`/`npm_cache/` (added 2026-10-30) are plain host directories, NOT inside any
+container's ephemeral storage — deleting/recreating this container (or `aegis-sandbox`,
+or the `aegis-backend`/`aegis-sandbox`/`aegis-redteam` images) never loses them.
+`_install_deps` in `control.py` points `PIP_CACHE_DIR`/`NPM_CONFIG_CACHE` at them, so a
+package version already downloaded once (for ANY repo, not just the one that first pulled
+it) is reused straight from disk on every later `requirements.txt`/`package.json` install
+-- only a genuinely new package or version actually hits PyPI/the npm registry again.
+
 Rebuilding `aegis-backend:latest` for an unrelated reason does not need this
 container recreated — it only reuses that image for its installed dependencies and never
-runs the image's own baked-in app code.
+runs the image's own baked-in app code. **Exception (2026-10-30):** `docker restart` reuses
+the layers already materialized at creation time, so if the rebuild adds/changes something
+this container actually needs (e.g. nodejs/npm, added for `_install_deps`'s npm support),
+a plain restart will NOT pick it up — stop+rm+re-run with this same command instead.
 
 ## Verify
 

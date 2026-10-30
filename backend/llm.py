@@ -60,6 +60,17 @@ PROVIDERS = {
         "default_model": "muse-spark-1.3",
         "reasoning_effort": "high",
     },
+    # "gpt" re-added 2026-10-30, test-only override: the owner's own high-TPM OpenAI account, used ONLY when a caller explicitly passes
+    # provider="gpt" in a user_message (e.g. a driver script) -- never exposed in web.py's /api/providers dropdown, so the real UI stays
+    # Muse-only for the hackathon submission regardless of whether OPENAI_API_KEY happens to be configured on this host. See
+    # _call_gpt's own docstring for why this reuses the Responses-API shape, same as _call_muse.
+    "gpt": {
+        "base_url": "https://api.openai.com/v1",
+        "key_env": "OPENAI_API_KEY",
+        "model_env": "GPT_MODEL",
+        "default_model": "gpt-6-luna",
+        "reasoning_effort": "high",
+    },
 }
 
 
@@ -199,13 +210,16 @@ def _input_responses_shape(messages: list) -> tuple:
 
 
 
-async def _call_muse(messages: list, tool_schemas: list, model_override: str = "") -> tuple:
+async def _call_muse(messages: list, tool_schemas: list, model_override: str = "", effort_override: str = "") -> tuple:
     """Meta's Muse Spark -- confirmed working 2026-10-27 against a real MUSE_API_KEY (genuine model catalog from /v1/models, genuine
     tool-calling responses). model_override lets a caller pick "muse-spark-1.3-contributor" (10x cheaper, usage CAN train Meta's model)
     vs. the default "muse-spark-1.3" (owner's Standard tier, usage never trains it) PER CALL -- core.run_turn sets this based on whether
     the turn is working on a public repo (redteam_clone_repo) or a private one (redteam_clone_private_repo)/the self target, since only
     public repo content is safe to let train a third party's model. Passed explicitly rather than via an env var so concurrent sessions
-    (or a mid-turn switch from public to private) can never race or leak one session's choice into another's."""
+    (or a mid-turn switch from public to private) can never race or leak one session's choice into another's.
+    effort_override (added 2026-10-30, test-only): the real API's reasoning.effort enum is none/minimal/low/medium/high/xhigh/max
+    (confirmed live against api.meta.ai) -- lets a caller (e.g. "muse-wonder-1.0" testing) force a level other than the default "high",
+    same never-set-by-the-real-UI spirit as model_override/ctx["force_model_override"]."""
     cfg = PROVIDERS["muse"]
     key = os.environ.get(cfg["key_env"], "")
     if not key:
@@ -215,7 +229,7 @@ async def _call_muse(messages: list, tool_schemas: list, model_override: str = "
         "model": model,
         "input": _input_responses_shape(messages),
         "tools": _tools_responses_shape(tool_schemas),
-        "reasoning": {"effort": cfg.get("reasoning_effort", "high")},
+        "reasoning": {"effort": effort_override or cfg.get("reasoning_effort", "high")},
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
@@ -236,19 +250,70 @@ async def _call_muse(messages: list, tool_schemas: list, model_override: str = "
                 args = {}
             calls.append({"id": item["call_id"], "name": item["name"], "arguments": args})
     usage = data.get("usage") or {}
-    return text, calls, {"model": model, "input_tokens": usage.get("input_tokens", 0), "output_tokens": usage.get("output_tokens", 0)}
+    # cached_tokens -- see _call_gpt's matching comment below for why this exists and the real incident that found it.
+    cached_tokens = (usage.get("input_tokens_details") or {}).get("cached_tokens", 0)
+    return text, calls, {"model": model, "input_tokens": usage.get("input_tokens", 0), "cached_tokens": cached_tokens,
+                          "output_tokens": usage.get("output_tokens", 0)}
 
 
-async def _chat_once(provider: str, messages: list, tool_schemas: list, model_override: str = "") -> tuple:
+async def _call_gpt(messages: list, tool_schemas: list) -> tuple:
+    """The owner's own OpenAI account, gpt-6-luna by default -- test-only override (see PROVIDERS["gpt"]'s own comment): never reachable
+    from the public UI dropdown, only by a caller explicitly passing provider="gpt" in a user_message (e.g. a driver script comparing
+    Muse's behavior against a known-good model). Mirrors _call_muse's Responses-API shape exactly, since gpt-6-luna is the model that
+    shape was originally written for (see PROVIDERS["muse"]'s own comment)."""
+    cfg = PROVIDERS["gpt"]
+    key = os.environ.get(cfg["key_env"], "")
+    if not key:
+        raise RuntimeError("gpt: no OPENAI_API_KEY configured")
+    model = os.environ.get(cfg["model_env"]) or cfg["default_model"]
+    body = {
+        "model": model,
+        "input": _input_responses_shape(messages),
+        "tools": _tools_responses_shape(tool_schemas),
+        "reasoning": {"effort": cfg.get("reasoning_effort", "high")},
+    }
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        r = await c.post(f"{cfg['base_url']}/responses", json=body, headers=headers)
+    if r.status_code != 200:
+        raise RuntimeError(f"gpt answered HTTP {r.status_code}: {r.text[:300]}")
+    data = r.json()
+    text, calls = "", []
+    for item in data.get("output", []):
+        if item.get("type") == "message":
+            for block in item.get("content", []):
+                if block.get("type") in ("output_text", "text"):
+                    text += block.get("text", "")
+        elif item.get("type") == "function_call":
+            try:
+                args = json.loads(item.get("arguments") or "{}")
+            except ValueError:
+                args = {}
+            calls.append({"id": item["call_id"], "name": item["name"], "arguments": args})
+    usage = data.get("usage") or {}
+    # cached_tokens (added 2026-10-30, a real cost-estimate bug caught live): the Responses API's own usage.input_tokens_details.
+    # cached_tokens is a REAL, separate field -- confirmed in a live test call -- and cached input bills at a much cheaper rate
+    # ($0.20/1M vs $4.00/1M for muse-wonder-1.0) than fresh input. A multi-round tool-calling session resends the whole growing
+    # conversation history every round, so the cache hit rate across a long session is naturally very high (91.1% confirmed on
+    # Meta's own billing dashboard for a real run) -- treating every input token as "fresh" overstated that run's real cost by
+    # roughly 5x. compute_cost_usd needs this split to price a call correctly; a model with no cached-rate entry just treats it
+    # as 0, so passing this through is harmless for every other provider.
+    cached_tokens = (usage.get("input_tokens_details") or {}).get("cached_tokens", 0)
+    return text, calls, {"model": model, "input_tokens": usage.get("input_tokens", 0), "cached_tokens": cached_tokens,
+                          "output_tokens": usage.get("output_tokens", 0)}
+
+
+async def _chat_once(provider: str, messages: list, tool_schemas: list, model_override: str = "", effort_override: str = "") -> tuple:
     """(text, tool_calls, usage) for one LLM round. messages is the OpenAI-shaped history (system/user/assistant/tool roles) regardless of
-    provider -- _call_claude/_call_muse translate it internally. usage is {"model", "input_tokens", "output_tokens"} -- see
-    model_pricing.compute_cost_usd for turning it into a dollar figure. model_override is only ever consumed by _call_muse today.
-    "gpt"/"local" don't exist in this build (Aegis is Muse-only -- see PROVIDERS' own comments) -- Aegis's version of this function
-    has both."""
+    provider -- _call_claude/_call_muse/_call_gpt translate it internally. usage is {"model", "input_tokens", "output_tokens"} -- see
+    model_pricing.compute_cost_usd for turning it into a dollar figure. model_override/effort_override are only ever consumed by _call_muse
+    today. "gpt" is a test-only override (see PROVIDERS["gpt"]'s own comment) -- never offered in the public UI dropdown."""
     if provider == "claude":
         return await _call_claude(messages, tool_schemas)
     if provider == "muse":
-        return await _call_muse(messages, tool_schemas, model_override)
+        return await _call_muse(messages, tool_schemas, model_override, effort_override)
+    if provider == "gpt":
+        return await _call_gpt(messages, tool_schemas)
     if provider == "gemini":
         return await _call_openai_compatible(provider, messages, tool_schemas)
     raise ValueError(f"unknown provider {provider!r}; choose one of {sorted(PROVIDERS)}")
@@ -257,14 +322,14 @@ async def _chat_once(provider: str, messages: list, tool_schemas: list, model_ov
 _CONNECT_RETRY_WAITS = (2.0, 5.0)    # seconds before the 2nd and 3rd attempt
 
 
-async def chat(provider: str, messages: list, tool_schemas: list, model_override: str = "") -> tuple:
+async def chat(provider: str, messages: list, tool_schemas: list, model_override: str = "", effort_override: str = "") -> tuple:
     """_chat_once, retried when the connection to the model server could not be OPENED (connect timeout / refused / DNS). Nothing was sent in
     that case, so repeating it is safe and cannot double-run anything. A real 2026-10-26 run lost its final answer to one 10 s connect
-    timeout on the relay after the scan and report were already done; a read timeout or an HTTP error is NOT retried. model_override --
-    see _call_muse's docstring -- is only meaningful for provider="muse"; every other provider ignores it."""
+    timeout on the relay after the scan and report were already done; a read timeout or an HTTP error is NOT retried. model_override/
+    effort_override -- see _call_muse's docstring -- are only meaningful for provider="muse"; every other provider ignores them."""
     for attempt, wait in enumerate((*_CONNECT_RETRY_WAITS, None), start=1):
         try:
-            return await _chat_once(provider, messages, tool_schemas, model_override)
+            return await _chat_once(provider, messages, tool_schemas, model_override, effort_override)
         except (httpx.ConnectTimeout, httpx.ConnectError) as e:
             from . import turnlog
             turnlog.log("llm_connect_retry", provider=provider, attempt=attempt, error=type(e).__name__, will_retry=wait is not None)

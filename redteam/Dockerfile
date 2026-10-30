@@ -5,7 +5,7 @@
 FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git nodejs npm openjdk-21-jre-headless \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir fastapi "uvicorn[standard]" httpx bandit==1.9.4 semgrep==1.182.1 pip-audit==2.10.1
+RUN pip install --no-cache-dir fastapi "uvicorn[standard]" httpx bandit==1.9.4 semgrep==1.170.0 pip-audit==2.10.1
 # gitleaks: a single static binary, no runtime deps
 RUN set -e; ARCH=$(dpkg --print-architecture); case "$ARCH" in arm64) GLARCH=arm64;; amd64) GLARCH=x64;; *) echo "unsupported arch $ARCH"; exit 1;; esac; \
     curl -sL "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_${GLARCH}.tar.gz" | tar -xz -C /usr/local/bin gitleaks \

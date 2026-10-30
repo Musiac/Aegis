@@ -5,6 +5,31 @@ from .tools import doc_tools, pentest_tools, redteam_tools, sandbox_tools, sandb
 
 TOOL_SCHEMAS = [
     {
+        "name": "redteam_check_repo_size",
+        "description": "Checks a github.com repo's real size via GitHub's own API -- NO clone performed. Call this BEFORE "
+                        "redteam_clone_repo for any repo you are not already confident is small, then call check_sandbox_capacity "
+                        "to compare against the current quota. If it would not fit, stop and ask the operator whether to raise the "
+                        "quota (increase_sandbox_capacity) before cloning -- never clone anyway and hope.",
+        "parameters": {"type": "object", "properties": {
+            "url": {"type": "string", "description": "The git repo URL (https://github.com/owner/repo)."},
+        }, "required": ["url"]},
+    },
+    {
+        "name": "check_sandbox_capacity",
+        "description": "Reports the sandbox's current /REPL scratch quota, how much is already used, and the underlying volume's real "
+                        "free space. Use together with redteam_check_repo_size before cloning any repo you're unsure will fit.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "increase_sandbox_capacity",
+        "description": "Raises the sandbox's /REPL scratch quota to the given size in MB, persisted across restarts. ONLY call this "
+                        "after the operator has explicitly agreed to raise the limit for a specific oversized repo -- never on your "
+                        "own initiative.",
+        "parameters": {"type": "object", "properties": {
+            "mb": {"type": "integer", "description": "The new quota in megabytes (comfortably above the repo's size, not wastefully large)."},
+        }, "required": ["mb"]},
+    },
+    {
         "name": "redteam_clone_repo",
         "description": "Clones a git repo (public or private) FRESH from GitHub into the dynamic target pool. "
                         "CRITICAL: When the operator gives an explicit GitHub URL, ALWAYS clone it from GitHub, even if the URL "
@@ -17,6 +42,8 @@ TOOL_SCHEMAS = [
         "parameters": {"type": "object", "properties": {
             "url": {"type": "string", "description": "The git repo URL (https://github.com/owner/repo or git@github.com:owner/repo)."},
             "name": {"type": "string", "description": "Optional target name to use instead of the auto-derived owner_repo slug."},
+            "reset": {"type": "boolean", "description": "Only set true if the operator explicitly asked to discard existing fixes and "
+                       "start this exact repo completely fresh. Default false: a repo already cloned this conversation keeps its fixes."},
         }, "required": ["url"]},
     },
     {
@@ -27,6 +54,8 @@ TOOL_SCHEMAS = [
             "url": {"type": "string", "description": "The GitHub repository URL (https://github.com/owner/repo)."},
             "token_file": {"type": "string", "description": "Full absolute path to a file containing the GitHub PAT (e.g., /home/ubuntu/token.txt)."},
             "name": {"type": "string", "description": "Optional target name to use instead of the auto-derived owner_repo slug."},
+            "reset": {"type": "boolean", "description": "Only set true if the operator explicitly asked to discard existing fixes and "
+                       "start this exact repo completely fresh. Default false: a repo already cloned this conversation keeps its fixes."},
         }, "required": ["url", "token_file"]},
     },
     *[
@@ -144,19 +173,25 @@ TOOL_SCHEMAS = [
         "name": "sandbox_app_start",
         "description": "Starts the REAL web server of a cloned (or self) project at http://www.sandbox.com:8900/, reachable from pentest_zap -- "
                         "the missing piece for 'start the cloned code's server and pentest it'. Stops whatever app was already running first. "
-                        "Only works for the backend/web.py + uvicorn convention unless you pass an explicit cmd.",
+                        "Only works for the backend/web.py + uvicorn convention unless you pass an explicit cmd. Before launching, installs "
+                        "the project's own declared dependencies (pip from requirements.txt/pyproject.toml, AND npm from package.json if "
+                        "present -- both run when both exist) automatically; the result's install_log shows what actually happened.",
         "parameters": {"type": "object", "properties": {
             "project": {"type": "string", "description": "The clone's name (from redteam_clone_repo/redteam_clone_private_repo), or \"self\"."},
             "cmd": {"type": "string", "description": "Optional: an explicit shell command to start the app instead of the uvicorn default."},
+            "install": {"type": "boolean", "description": "Default true: installs declared pip/npm dependencies before starting. Set "
+                         "false only if you already know this project needs no install step and want to skip the time cost."},
         }, "required": ["project"]},
     },
     {
         "name": "sandbox_app_restart",
         "description": "Restarts the sandboxed app from the project's CURRENT working copy. Call this after writing a fix, right before "
-                        "re-running pentest_zap, so the re-scan is against the fixed code.",
+                        "re-running pentest_zap, so the re-scan is against the fixed code. Re-installs pip/npm deps by default (install=false "
+                        "to skip if you know they haven't changed since the last start).",
         "parameters": {"type": "object", "properties": {
             "project": {"type": "string"},
             "cmd": {"type": "string"},
+            "install": {"type": "boolean"},
         }, "required": ["project"]},
     },
     {
@@ -206,6 +241,9 @@ TOOL_SCHEMAS = [
 ]
 
 DISPATCH = {
+    "redteam_check_repo_size": redteam_tools.redteam_check_repo_size,
+    "check_sandbox_capacity": sandbox_tools.check_sandbox_capacity,
+    "increase_sandbox_capacity": sandbox_tools.increase_sandbox_capacity,
     "redteam_clone_repo": redteam_tools.redteam_clone_repo,
     "redteam_clone_private_repo": redteam_tools.redteam_clone_private_repo,
     "redteam_gitleaks": redteam_tools.redteam_gitleaks,
