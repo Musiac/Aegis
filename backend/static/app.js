@@ -332,12 +332,13 @@
         addChatMsg("error", msg.text);
       } else if (msg.type === "warn") {
         // Contributor model + a confirmed-private repo (added 2026-10-30): a real training-data-exposure warning the operator must
-        // actively accept or decline before the task continues -- shown in red (see .msg.warn in style.css), answered with a native
-        // confirm() dialog (simplest reliable yes/no here; the server is synchronously waiting on confirm_response either way).
+        // actively accept or decline before the task continues -- shown in red (see .msg.warn in style.css). Answered by typing
+        // yes/no as an ordinary chat message (the server accepts that directly -- see web.py's confirm gate). The native
+        // confirm() popup this used to fire was removed the same day it was added: it could silently resolve the warning
+        // before the operator ever typed a reply, which was the direct cause of a real incident where a "no" typed in chat
+        // landed too late to matter. The red warning text is attention-getting enough on its own.
         clearPendingDots();
         addChatMsg("warn", msg.text);
-        const ok = window.confirm(msg.text);
-        ws.send(JSON.stringify({ type: "confirm_response", confirm: ok }));
       } else if (msg.type === "cost") {
         // The FINAL value for this turn -- the server only ever sends this once run_turn has fully finished
         // accumulating every LLM round's real token cost, right before "done", so this always replaces the
