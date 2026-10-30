@@ -659,25 +659,6 @@ async def ws_endpoint(ws: WebSocket):
             if "effort" in msg:
                 ctx["force_reasoning_effort"] = str(msg.get("effort", "")).strip()
 
-            # Contributor + a CONFIRMED-private repo is a real "your data may train Meta's models" exposure the operator must actively
-            # accept, not something that happens because contributor is simply the default (added 2026-10-30, the owner's own request).
-            # Gated here, before run_turn ever starts, not mid-turn -- repo_visibility is only known-private once a PRIOR turn already
-            # confirmed it (first turn on a brand-new private repo can't be warned about pre-emptively; core.run_turn's own fail-closed
-            # contributor gate -- unaffected by this dropdown -- still protects that first turn regardless).
-            if variant.get("contributor") and ctx.get("repo_visibility") == "private" and not ctx.get("_contributor_private_ok"):
-                await _send({"type": "warn", "text": "WARNING: You have chosen the Contributor (cheapest) model for this private repo "
-                                                       "task. Your data may be used for Meta's training. Should I go ahead?"})
-                try:
-                    raw2 = await asyncio.wait_for(ws.receive_text(), timeout=120.0)
-                    confirm_msg = json.loads(raw2)
-                except (asyncio.TimeoutError, ValueError):
-                    confirm_msg = {}
-                if not confirm_msg.get("confirm"):
-                    await _send({"type": "chat", "text": "Cancelled -- pick Standard or Wonder, or confirm, before I continue with this private repo."})
-                    await _send({"type": "done"})
-                    continue
-                ctx["_contributor_private_ok"] = True   # sticky for the rest of THIS session once accepted -- never re-ask every turn
-
             control = _control_word(text)
             busy_task = turn_state["task"]
             busy = busy_task is not None and not busy_task.done()
@@ -689,6 +670,15 @@ async def ws_endpoint(ws: WebSocket):
                 # see the comment there). Anything that is not stop/pause while busy is rejected rather than
                 # queued -- queuing silently would mean the operator's words land as a DIFFERENT turn's opening
                 # message later, with no clear "this applied to which task" story in the transcript.
+                #
+                # Checked BEFORE the contributor+private warning gate below (real bug found live 2026-10-30: typing
+                # "stop" while busy landed on a turn where repo_visibility had just become known private, so the
+                # warning gate fired FIRST and swallowed the "stop" message into an unexpected, out-of-context
+                # confirm() popup -- the operator never consciously answered it, yet it silently set
+                # _contributor_private_ok, so a later typed "no" meant to cancel the (already-resolved) warning
+                # instead landed as a brand-new, ambiguous task request and the model just restarted the whole job).
+                # Busy/control handling must always win over the warning gate: you can't be asked to confirm a
+                # NEW task's model choice while a task is still running.
                 if control == "stop":
                     ctx["_control_request"] = "stop"
                     await _send({"type": "chat", "text": "Stopping after the step that's running now..."})
@@ -698,6 +688,38 @@ async def ws_endpoint(ws: WebSocket):
                 else:
                     await _send({"type": "error", "text": 'Still working on the previous task -- say "pause" or "stop" to interrupt, or wait for it to finish.'})
                 continue
+
+            # Contributor + a CONFIRMED-private repo is a real "your data may train Meta's models" exposure the operator must actively
+            # accept, not something that happens because contributor is simply the default (added 2026-10-30, the owner's own request).
+            # Gated here, before run_turn ever starts, not mid-turn -- repo_visibility is only known-private once a PRIOR turn already
+            # confirmed it (first turn on a brand-new private repo can't be warned about pre-emptively; core.run_turn's own fail-closed
+            # contributor gate -- unaffected by this dropdown -- still protects that first turn regardless). Only reached once we know
+            # NO turn is currently busy (see above) -- never ask this mid-task.
+            if variant.get("contributor") and ctx.get("repo_visibility") == "private" and not ctx.get("_contributor_private_ok"):
+                await _send({"type": "warn", "text": "WARNING: You have chosen the Contributor (cheapest) model for this private repo "
+                                                       "task. Your data may be used for Meta's training. Should I go ahead?"})
+                try:
+                    raw2 = await asyncio.wait_for(ws.receive_text(), timeout=120.0)
+                    confirm_msg = json.loads(raw2)
+                except (asyncio.TimeoutError, ValueError):
+                    confirm_msg = {}
+                # Accept a plain typed reply too, not just the native confirm() popup's structured confirm_response
+                # (real bug found live 2026-10-30, same incident as above: the warning text reads like an ordinary
+                # chat question ("Should I go ahead?"), so an operator typing "no"/"yes" into the chat box -- a
+                # completely reasonable reaction to reading it -- sent a plain {"type":"user_message"} that this
+                # code did not recognize as an answer at all, leaving the warning's real resolution entirely up to
+                # a silent browser popup the operator may never have consciously engaged with).
+                if confirm_msg.get("type") == "confirm_response":
+                    confirmed = bool(confirm_msg.get("confirm"))
+                elif confirm_msg.get("type") == "user_message":
+                    confirmed = str(confirm_msg.get("text") or "").strip().lower() in ("yes", "y", "go ahead", "confirm", "ok", "okay")
+                else:
+                    confirmed = False
+                if not confirmed:
+                    await _send({"type": "chat", "text": "Cancelled -- pick Standard or Wonder, or confirm, before I continue with this private repo."})
+                    await _send({"type": "done"})
+                    continue
+                ctx["_contributor_private_ok"] = True   # sticky for the rest of THIS session once accepted -- never re-ask every turn
 
             try:
                 # Re-picked every turn, not cached: if the operator left the dropdown on "auto" (dropdown_choice=="")
