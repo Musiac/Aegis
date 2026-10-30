@@ -408,7 +408,10 @@ def _maybe_announce_muse_billing(messages: list, ctx: dict, provider: str) -> No
     """Once per session, the moment "muse" is first the active provider, tells the model to disclose the public/contributor vs.
     private/Standard billing split in its own next reply -- added 2026-10-27, owner's own instruction: the operator should be told this
     up front, not just have it happen silently in the background. core.run_turn's repo_visibility tracking (see its own comment) is what
-    actually picks the model per call; this only makes the model SAY what it's doing."""
+    actually picks the model per call; this only makes the model SAY what it's doing. Also where the scanner-tool-recency check now
+    happens (added 2026-10-30, owner's own instruction after the automatic greeting was shortened to a single fixed line and the
+    recency check -- and the chance to offer an update -- stopped happening on its own): still once per session, still gated on this
+    same first-real-task moment, just no longer inside the greeting itself."""
     if provider != "muse" or ctx.get("muse_billing_announced"):
         return
     ctx["muse_billing_announced"] = True
@@ -416,17 +419,24 @@ def _maybe_announce_muse_billing(messages: list, ctx: dict, provider: str) -> No
     # round ends; a prompt-only "still call your normal tools this round" instruction (below) has been observed live to NOT be
     # enough on its own: the model sometimes emits only the disclosure text and ends the turn right there, leaving the operator's
     # actual request completely unanswered.
+    ctx["_scanner_check_nudge_pending"] = True   # same backstop, same core.run_turn guard, for a DIFFERENT failure mode: the model
+    # has been observed live to skip check_scanner_versions entirely and go straight to the operator's real task (clone/scan/fix),
+    # satisfying "some tool call happened" without ever doing the recency check or offering an update at all.
     messages.append({"role": "system", "content": (
         "You are now running on Meta's Muse Spark. Your VERY NEXT REPLY's TEXT must be the FULL disclosure below, written out in "
         "full -- never a short label or summary of it, never anything shorter than a real explanation. Use this almost verbatim, "
         "in your own voice: \"Hi, I am Aegis. Quick note: I work on public repos using the cheaper Muse contributor model, so "
         "public repo code may be used for training. Private repos or my own code use the regular Muse model and are never used for "
-        "training.\" Say this ONCE, this exact level of detail, not a terser version. This is a TEXT-ONLY instruction about THIS "
-        "round's reply -- it never changes which tools you call or how many rounds the operator's actual request takes. If your "
-        "normal reasoning for their request would also call a tool in this SAME round, still do that, in the SAME round, exactly "
-        "as you normally would. If their request needs tool calls in LATER rounds instead (reading a tool's result first, or "
-        "several steps), that is completely normal too -- do NOT treat emitting this disclosure as if it already answered their "
-        "request or ended the turn; keep working the actual request in the rounds after this one until it is genuinely done."
+        "training.\" Say this ONCE, this exact level of detail, not a terser version. "
+        "In this SAME round, ALSO call check_scanner_versions (this is required, not optional, and is separate from and in addition "
+        "to the operator's own request below) -- the next round after its result comes back is where you narrate something like "
+        "\"Checking my tool's recency...\" and report it, following check_scanner_versions's own instructions about asking whether "
+        "to update anything outdated. It is completely fine, expected even, for that round to end there with a question and no "
+        "further tool calls, waiting for the operator's answer before starting their actual request -- that is not an incomplete "
+        "turn, it is the right place to pause. Only once that is resolved (updated, declined, or nothing was outdated) do you move "
+        "on to their actual request, in the rounds after. This is a TEXT-ONLY instruction about THIS round's disclosure sentence -- "
+        "it never changes which tools you call or how many rounds the operator's actual request takes once you get to it; do NOT "
+        "treat emitting the disclosure, or the scanner check, as if it already answered their request or ended the turn."
     )})
 
 
