@@ -445,8 +445,15 @@ async def pentest_lateral_movement(args: dict, ctx: dict) -> str:
 
 async def check_scanner_versions(args: dict, ctx: dict) -> str:
     """Checks if any of the security scanning tools (gitleaks, Bandit, Semgrep, pip-audit, Trivy, ZAP, npm) have newer
-    versions available. Returns current vs latest version for each tool. Call this during your initial greeting to report
-    tool recency status."""
+    versions available -- and, if any are outdated, updates them immediately, live, with no operator confirmation
+    needed (owner's own instruction, 2026-10-31: there is no real scenario where the operator would ever say no to
+    a tool update, so asking first just adds a wasted round-trip). This is deterministic in CODE, not a model
+    decision to call update_scanner_tools afterward -- same reason check_scanner_versions moved out of a
+    prompt-only "also call this tool" instruction on 2026-10-30 (see _maybe_announce_muse_billing's own comment):
+    a model-side "also do X" instruction has been observed live to simply not fire reliably, and this auto-update
+    is exactly as load-bearing as that version check itself. Call this during your initial greeting, or whenever
+    the operator asks about tool recency -- either way it already did the work by the time you see the result.
+    update_scanner_tools stays separately callable too, for an explicit re-run on specific tools."""
     why = _gate()
     if why:
         return why
@@ -457,41 +464,50 @@ async def check_scanner_versions(args: dict, ctx: dict) -> str:
     if r.status_code != 200:
         return json.dumps({"ok": False, "error": f"version check failed: HTTP {r.status_code}"})
 
-    data = r.json()
+    before = r.json()
     # outdated_count/outdated_tools are computed by CODE, from the same list the model is about to read -- a
     # number for it to count its own reported lines against, the same "exact tally it must copy, never recount
     # or guess" pattern _tally() uses for scan findings elsewhere in this file. Found live 2026-10-30, right after
     # the automatic greeting was shortened: a prose-only instruction (no computed count to check against) reported
     # just the FIRST outdated tool with no version numbers at all when only one happened to be behind -- a plain
     # "report every outdated tool" instruction is easy to silently satisfy with one tool and still read as complete.
-    outdated = [t for t in data.get("tools", []) if t.get("status") not in ("latest", "system-managed")]
-    data["outdated_count"] = len(outdated)
-    data["outdated_tools"] = [t.get("name") for t in outdated]
-    data["note"] = (
-        f"outdated_count is {len(outdated)} ({data['outdated_tools']}) -- computed by code from this SAME result, "
-        "not your own count. Your reply MUST list EVERY tool from `tools`, one per line, in the order given. For "
-        "EACH of the outdated_count tool(s) in outdated_tools (there may be more than one -- list ALL of them, "
-        "never only the first), write BOTH real version numbers in this exact shape: "
-        "'<name> <current> -> <latest> available' (e.g. 'Semgrep 1.182.1 -> 1.183.0 available') -- never just "
-        "'update available' with no version numbers, and never skip any tool in outdated_tools. For every other "
-        "tool (status 'latest' or 'system-managed'), '<name> <current> (latest)' is enough. Use the real "
-        "current/latest values from this result exactly, never invent, round or recall them from memory."
-        + ("" if not outdated else (
-            " Since outdated_count is greater than 0, end your reply by asking plainly: would the operator like you "
-            "to update the outdated tool(s) now? Mention this is a real, permanent update that survives a "
-            "container restart/recreate, not just this session. Only call update_scanner_tools if they say yes -- "
-            "never on your own initiative, and never for a tool not in outdated_tools."
-        ))
+    outdated = [t for t in before.get("tools", []) if t.get("status") not in ("latest", "system-managed")]
+    before["outdated_count"] = len(outdated)
+    before["outdated_tools"] = [t.get("name") for t in outdated]
+
+    if not outdated:
+        before["note"] = (
+            f"outdated_count is 0 -- computed by code from this SAME result, not your own count. Your reply MUST "
+            "list EVERY tool from `tools`, one per line, in the order given, as '<name> <current> (latest)' or "
+            "'<name> <current> (system-managed)'. Use the real current values from this result exactly, never "
+            "invent, round or recall them from memory."
+        )
+        return json.dumps(before)
+
+    update_result = await update_scanner_tools({"tools": before["outdated_tools"]}, ctx)
+    after = json.loads(update_result)
+    after["before"] = before
+    after["note"] = (
+        f"Found {len(outdated)} outdated tool(s) ({before['outdated_tools']}) and updated them immediately, with "
+        "no operator confirmation needed -- this already happened, it is not a plan. Your reply MUST, in order: "
+        "(1) for EACH tool that was found outdated, one line in the shape 'Found <name> <old_version> to be "
+        "outdated (latest is <new_version>) -- updating now.' using the REAL before-values from `before.tools` "
+        "and after-values from `versions.tools` below, never invented; (2) then one line per tool from "
+        "`versions.tools` (every tool, not just the ones just updated), each as '<name> <current> (latest)' or, "
+        "for any tool `attempted` above marked ok:false, '<name> <current> -- update failed: <error>, still "
+        "outdated'. Never claim a tool updated cleanly if its own `attempted` entry says ok:false."
     )
-    return json.dumps(data)
+    return json.dumps(after)
 
 
 async def update_scanner_tools(args: dict, ctx: dict) -> str:
-    """Actually upgrades the named tool(s), live, in the redteam container -- real pip installs / binary downloads
-    into its host-mounted /tool_updates (see aegis-libraries/redteam_server.py's own module comment for why that's safe without
-    touching its read-only root, AND why it's a real, permanent update, not a session-only one), never a claim
-    without a real action behind it. Only ever called after the operator said yes to an update
-    check_scanner_versions offered them."""
+    """Actually upgrades the named tool(s), live, in the aegis-libraries container -- real pip installs / binary
+    downloads into its host-mounted /tool_updates (see aegis-libraries/redteam_server.py's own module comment for
+    why that's safe without touching its read-only root, AND why it's a real, permanent update, not a
+    session-only one), never a claim without a real action behind it. check_scanner_versions already calls this
+    itself the moment it finds anything outdated (2026-10-31, owner's own instruction: no operator confirmation
+    needed first) -- this stays separately callable for an explicit re-run on specific tools, e.g. if the
+    operator names one directly."""
     why = _gate()
     if why:
         return why

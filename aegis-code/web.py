@@ -423,13 +423,21 @@ def _format_scanner_versions(result: str) -> tuple:
     """Shared by the no-MUSE-key fallback and _run_greeting's own real check below -- one formatting rule, used
     everywhere a scanner_versions result becomes chat text, so the two paths can never drift apart. Returns
     (lines, outdated) where outdated is the real {name: {current, latest}} dict for whatever is behind, straight
-    from the tool's own JSON -- never re-derived or guessed."""
+    from the tool's own JSON -- never re-derived or guessed.
+
+    check_scanner_versions returns one of two shapes (2026-10-31, auto-update): nothing was outdated -> the plain
+    {"tools": [...]} check result itself; something was outdated and got updated -> {"versions": {"tools": [...]},
+    "before": {...}, "attempted": [...], ...}, where "tools" now lives one level deeper, under the POST-update
+    recheck. Both are handled here so callers never need to know which one they got."""
     try:
         parsed = json.loads(result)
     except ValueError:
         return [], {}
+    if not isinstance(parsed, dict):
+        return [], {}
+    tool_list = (parsed.get("versions") or {}).get("tools", []) if "versions" in parsed else parsed.get("tools", [])
     lines, outdated = [], {}
-    for tool in parsed.get("tools", []) if isinstance(parsed, dict) else []:
+    for tool in tool_list or []:
         name, current, latest, status = tool.get("name", "?"), tool.get("current", "?"), tool.get("latest"), tool.get("status")
         if status == "latest" or status == "system-managed":
             lines.append(f"- ✅ {name} {current} (latest)" if status == "latest" else f"- ✅ {name} {current} (system-managed)")
@@ -439,6 +447,31 @@ def _format_scanner_versions(result: str) -> tuple:
         else:
             lines.append(f"- ❓ {name}: version check failed ({tool.get('error', 'unknown error')})")
     return lines, outdated
+
+
+def _format_auto_update_announcement(result: str) -> list:
+    """The "found it, updating now" lines for whatever check_scanner_versions already auto-updated -- built from
+    `before` (what was outdated before the update ran) and `attempted` (what the real update attempt did for
+    each), both straight from the tool's own JSON, never re-derived. Returns [] when nothing was outdated (the
+    plain-check shape has neither key)."""
+    try:
+        parsed = json.loads(result)
+    except ValueError:
+        return []
+    before = (parsed.get("before") or {}) if isinstance(parsed, dict) else {}
+    attempted = {a.get("name"): a for a in (parsed.get("attempted") or [])}
+    lines = []
+    for name in before.get("outdated_tools") or []:
+        tool = next((t for t in before.get("tools", []) if t.get("name") == name), {})
+        current, latest = tool.get("current", "?"), tool.get("latest", "?")
+        a = attempted.get(name)
+        if a and a.get("ok"):
+            lines.append(f"- 🔧 Found {name} {current} to be outdated (latest is {latest}) -- updated now.")
+        elif a:
+            lines.append(f"- ⚠️ Found {name} {current} to be outdated (latest is {latest}) -- auto-update failed: {a.get('error', 'unknown error')}.")
+        else:
+            lines.append(f"- 🔧 Found {name} {current} to be outdated (latest is {latest}) -- auto-updating now.")
+    return lines
 
 
 def _maybe_announce_muse_billing(messages: list, ctx: dict, provider: str) -> None:
@@ -622,9 +655,11 @@ async def ws_endpoint(ws: WebSocket):
             result = await check_scanner_versions({}, ctx)
             await _send({"type": "terminal", "line": "-> check_scanner_versions()"})
             await _send({"type": "terminal", "line": f"   {result[:600]}"})
+            announce = _format_auto_update_announcement(result)
             lines, _ = _format_scanner_versions(result)
-            if lines:
-                await _send({"type": "chat", "text": "\n".join(lines)})
+            text = ("\n".join(announce) + "\n\n" if announce else "") + "\n".join(lines)
+            if text.strip():
+                await _send({"type": "chat", "text": text})
         except Exception as e:                                                  # noqa: BLE001 -- the fallback path itself must never crash the socket
             await _send({"type": "error", "text": f"Scanner version check failed: {type(e).__name__}: {e}"})
         await _send({"type": "done"})
@@ -808,22 +843,26 @@ async def _run_greeting(ws, messages, ctx, on_text, on_tool_call, _total_cost_us
     check IS still automatic (owner's own instruction, same day): first tried as a prompt-only "also call this tool"
     instruction folded into _maybe_announce_muse_billing, found live to simply not fire reliably -- moved here
     instead, as a direct function call, so it can never silently fail to happen the way a model-side instruction
-    can. Send stays disabled for the WHOLE function (the caller doesn't re-enable it until "done" arrives after
+    can. As of 2026-10-31 (owner's own instruction, Phase 3 of the sandbox-trio refactor) check_scanner_versions
+    itself auto-updates anything outdated with no operator confirmation -- the owner's own words: "i did not find
+    any scenario in which i will say no, do not update it ... auto update is the correct path." _format_scanner_versions
+    / _format_auto_update_announcement turn that already-done result into chat text; neither ever asks a question.
+    Send stays disabled for the WHOLE function (the caller doesn't re-enable it until "done" arrives after
     this returns), so the operator sees the real tool state before they can send anything, not just a static line."""
     await on_text("Hi, I am Aegis. How can I help you?")
     try:
         result = await check_scanner_versions({}, ctx)
         await on_tool_call("check_scanner_versions", {}, result)
-        lines, outdated = _format_scanner_versions(result)
-        if lines:
-            report = "Checking my tool's recency:\n\n" + "\n".join(lines)
-            if outdated:
-                names = ", ".join(f"{n} {v['current']} -> {v['latest']}" for n, v in outdated.items())
-                report += f"\n\n{names} -- would you like me to update {'it' if len(outdated) == 1 else 'them'} now?"
-            await on_text(report)
-            # So a later "yes, update it" has real context to act on -- the model sees this exact report and
-            # question as its own earlier turn, the same way it would if it had generated the text itself.
-            messages.append({"role": "assistant", "content": report})
+        announce = _format_auto_update_announcement(result)
+        lines, _ = _format_scanner_versions(result)
+        report = "Checking my tool's recency:\n\n"
+        if announce:
+            report += "\n".join(announce) + "\n\n"
+        report += "\n".join(lines) if lines else "(no scanner tools reported)"
+        await on_text(report)
+        # So a later question about tool versions has real context to act on -- the model sees this exact report
+        # as its own earlier turn, the same way it would if it had generated the text itself.
+        messages.append({"role": "assistant", "content": report})
     except Exception as e:                                                       # noqa: BLE001 -- a bad scanner-version check must never block the session from opening
         await ws.send_text(json.dumps({"type": "error", "text": f"Scanner version check failed: {type(e).__name__}: {e}"}))
     try:

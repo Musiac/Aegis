@@ -222,20 +222,22 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "check_scanner_versions",
-        "description": "Checks if security scanning tools (gitleaks, Bandit, Semgrep, pip-audit, Trivy, OWASP ZAP, npm) have updates available. "
-                        "Call this whenever the operator asks for it (no longer automatic at startup). Returns current vs latest version for "
-                        "each tool -- current is always queried live, so this reflects reality even right after update_scanner_tools runs.",
+        "description": "Checks if security scanning tools (gitleaks, Bandit, Semgrep, pip-audit, Trivy, OWASP ZAP, npm) have updates available -- "
+                        "and if any are outdated, updates them immediately, with no operator confirmation needed (this already happened by the "
+                        "time you see the result, it is not a plan to narrate). Called automatically at every connect; also call it whenever the "
+                        "operator asks about tool recency. Returns the before-state, the update attempt (if any), and the final live versions.",
         "parameters": {"type": "object", "properties": {}},
     },
     {
         "name": "update_scanner_tools",
-        "description": "Actually upgrades the named outdated scanner tool(s) to their real latest release, written to this host's own "
-                        "persistent tool-update folder -- it survives a container restart/recreate, it is not a session-only change. Only "
-                        "call this AFTER the operator has explicitly said yes to an update you offered -- never on your own initiative. tools must be real names "
-                        "from check_scanner_versions's own outdated_tools list, never invented or guessed. Re-checks and returns the final "
-                        "real versions itself, so call check_scanner_versions again only if you need a check with nothing else happening.",
+        "description": "Actually upgrades the named scanner tool(s) to their real latest release, written to this host's own "
+                        "persistent tool-update folder -- it survives a container restart/recreate, it is not a session-only change. "
+                        "check_scanner_versions already calls this itself the instant it finds anything outdated, with no confirmation needed -- "
+                        "call this directly only for an explicit re-run on specific tool name(s) the operator names. tools must be real scanner "
+                        "names (gitleaks, bandit, semgrep, pip-audit, trivy, zaproxy), never invented or guessed. Re-checks and returns the final "
+                        "real versions itself.",
         "parameters": {"type": "object", "properties": {
-            "tools": {"type": "array", "items": {"type": "string"}, "description": "Exact tool names from outdated_tools, e.g. [\"semgrep\", \"gitleaks\"]."},
+            "tools": {"type": "array", "items": {"type": "string"}, "description": "Exact tool names, e.g. [\"semgrep\", \"gitleaks\"]."},
         }, "required": ["tools"]},
     },
 ]
