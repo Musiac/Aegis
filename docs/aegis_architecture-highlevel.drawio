@@ -16,20 +16,20 @@
         <mxCell id="net_boundary" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=none;strokeColor=#82b366;dashed=1;fontSize=14;fontStyle=1;strokeWidth=3;" value="&lt;b&gt;&lt;font style=&quot;font-size: 18px;&quot;&gt;Aegis(&lt;/font&gt;&lt;font style=&quot;font-size: 18px;&quot;&gt;&lt;span style=&quot;font-weight: normal;&quot;&gt;&lt;b&gt;A&lt;/b&gt;gentic &lt;b&gt;E&lt;/b&gt;nterprise &lt;b&gt;G&lt;/b&gt;uard for &lt;b&gt;I&lt;/b&gt;nfo&lt;b&gt;S&lt;/b&gt;ec&lt;/span&gt;&lt;/font&gt;&lt;font style=&quot;font-size: 18px;&quot;&gt;) - High Level Diagram&lt;/font&gt;&lt;/b&gt;" vertex="1">
           <mxGeometry height="550" width="790" x="260" y="10" as="geometry" />
         </mxCell>
-        <mxCell id="backend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" value="&lt;div&gt;Aegis&amp;nbsp;&lt;/div&gt;&lt;div&gt;with Tool calling capabilities&lt;/div&gt;" vertex="1">
+        <mxCell id="backend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" value="&lt;div&gt;Aegis&amp;nbsp;&lt;/div&gt;&lt;div&gt;with Tool calling capabilities&lt;/div&gt;&lt;div&gt;PERMANENT&lt;/div&gt;" vertex="1">
           <mxGeometry height="90" width="230" x="300" y="80" as="geometry" />
         </mxCell>
-        <mxCell id="redteam" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" value="&lt;div&gt;1- Active and&lt;/div&gt;&lt;div&gt;6 - Passive Scan Tools&lt;/div&gt;&lt;div&gt;+ Guardrails&lt;/div&gt;" vertex="1">
-          <mxGeometry height="90" width="260" x="710" y="80" as="geometry" />
+        <mxCell id="redteam" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" value="&lt;div&gt;1- Active and&lt;/div&gt;&lt;div&gt;6 - Passive Scan Tools&lt;/div&gt;&lt;div&gt;+ Guardrails&lt;/div&gt;&lt;div&gt;(incl. 3rd-party URL liveness probe)&lt;/div&gt;&lt;div&gt;PERMANENT&lt;/div&gt;" vertex="1">
+          <mxGeometry height="105" width="260" x="710" y="80" as="geometry" />
         </mxCell>
-        <mxCell id="pentestlive" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" value="&lt;div&gt;Tool to Scan liveness&amp;nbsp;&lt;/div&gt;&lt;div&gt;of 3rd-party URL&lt;/div&gt;" vertex="1">
-          <mxGeometry height="80" width="220" x="290" y="460" as="geometry" />
+        <mxCell id="ephemeral_boundary" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=none;strokeColor=#b85450;dashed=1;fontSize=13;fontStyle=1;strokeWidth=3;" value="EPHEMERAL SANDBOX TRIO — created on demand, destroyed after 5 minutes idle" vertex="1">
+          <mxGeometry height="335" width="675" x="310" y="235" as="geometry" />
         </mxCell>
         <mxCell id="sandboxproxy" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" value="sandbox-proxy" vertex="1">
-          <mxGeometry height="70" width="260" x="330" y="265" as="geometry" />
+          <mxGeometry height="70" width="260" x="330" y="280" as="geometry" />
         </mxCell>
         <mxCell id="sandbox_boundary" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;fontSize=13;fontStyle=1;" value="locked-down sandbox" vertex="1">
-          <mxGeometry height="120" width="270" x="640" y="255" as="geometry" />
+          <mxGeometry height="120" width="270" x="640" y="270" as="geometry" />
         </mxCell>
         <mxCell id="sandbox" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" value="Aegis Runs command&amp;nbsp;" vertex="1">
           <mxGeometry height="75" width="230" x="660" y="283" as="geometry" />
@@ -74,14 +74,8 @@
             <mxPoint x="709.9999999999998" y="110" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="e5" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;" target="pentestlive" value="Active Scan Tool Call">
-          <mxGeometry relative="1" x="0.4483" as="geometry">
-            <mxPoint as="offset" />
-            <Array as="points">
-              <mxPoint x="320" y="420" />
-              <mxPoint x="320" y="420" />
-            </Array>
-          </mxGeometry>
+        <mxCell id="e5" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;entryX=0.25;entryY=1;entryDx=0;entryDy=0;" target="redteam" value="Active Scan Tool Call">
+          <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="e6" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;" target="sandboxproxy" value="Runs commands">
           <mxGeometry relative="1" as="geometry">
@@ -152,8 +146,8 @@
             <mxPoint x="620" y="635" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="legend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;align=left;fontSize=11;" value="Legend&lt;br&gt;Green = Docker container for Aegis&lt;br&gt;Red dashed = locked-down sandbox&lt;br&gt;Orange = external service (Meta API / GitHub)&lt;br&gt;Grey = Mac/Windows mounted volume, accessible from Sandobx" vertex="1">
-          <mxGeometry height="120" width="240" x="10" y="420" as="geometry" />
+        <mxCell id="legend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;align=left;fontSize=11;" value="Legend&lt;br&gt;Green = Docker container for Aegis&lt;br&gt;Red dashed (outer) = ephemeral sandbox trio&lt;br&gt;  (created on demand, destroyed after 5min idle)&lt;br&gt;Red dashed (inner) = locked-down sandbox&lt;br&gt;Orange = external service (Meta API / GitHub)&lt;br&gt;Grey = Mac/Windows mounted volume, accessible from Sandobx" vertex="1">
+          <mxGeometry height="135" width="240" x="10" y="420" as="geometry" />
         </mxCell>
         <mxCell id="GYNbHo0G-CETyHOJn-I0-2" edge="1" parent="1" source="redteam" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;dashed=1;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=1.003;entryY=0.174;entryDx=0;entryDy=0;entryPerimeter=0;" target="vol_targets" value="">
           <mxGeometry relative="1" x="-0.9365" as="geometry">
@@ -166,7 +160,7 @@
             <mxPoint x="1017.5" y="470" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="sandboxweb" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" value="&lt;div&gt;Cloned Repo at&lt;/div&gt;&lt;div&gt;www.sandbox.com:8900&lt;/div&gt;&lt;div&gt;(for pentest)&lt;/div&gt;" vertex="1">
+        <mxCell id="sandboxweb" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" value="&lt;div&gt;Cloned Repo at&lt;/div&gt;&lt;div&gt;www.sandbox.com:8900&lt;/div&gt;&lt;div&gt;(for pentest)&lt;/div&gt;" vertex="1">
           <mxGeometry height="80" width="195" x="770" y="470" as="geometry" />
         </mxCell>
       </root>
