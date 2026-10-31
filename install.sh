@@ -99,10 +99,10 @@ docker volume create aegis-sock >/dev/null; docker volume create aegis-work >/de
 grep -q '^TRIO_CONTROL_TOKEN=' "$ENV_FILE" || echo "TRIO_CONTROL_TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" >> "$ENV_FILE"
 TRIO_CONTROL_TOKEN=$(grep '^TRIO_CONTROL_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
 mkdir -p logs
-if ! curl -s -o /dev/null "http://127.0.0.1:7909/status"; then
+if ! curl -s -o /dev/null "http://127.0.0.1:7929/status"; then
   TRIO_CONTROL_TOKEN="$TRIO_CONTROL_TOKEN" AEGIS_REPO_ROOT="$(pwd)" nohup python3 trio_control/server.py >> logs/trio_control.log 2>&1 &
   disown
-  for i in $(seq 1 20); do curl -s -o /dev/null "http://127.0.0.1:7909/status" && break; sleep 0.5; done
+  for i in $(seq 1 20); do curl -s -o /dev/null "http://127.0.0.1:7929/status" && break; sleep 0.5; done
 fi
 bash trio_control/start_trio.sh
 
@@ -128,7 +128,7 @@ docker rm -f aegis-code >/dev/null 2>&1 || true
 docker run -d --name aegis-code --network aegis-net -p 8900:8900 -v aegis-sock:/sock --env-file .env --restart unless-stopped \
   --add-host=host.docker.internal:host-gateway \
   -e AEGIS_REDTEAM_URL="http://aegis-libraries:7906" -e AEGIS_PENTESTLIVE_URL="http://aegis-libraries:7907" \
-  -e TRIO_CONTROL_HOST="host.docker.internal" -e TRIO_CONTROL_PORT="7909" -e TRIO_CONTROL_TOKEN="$TRIO_CONTROL_TOKEN" \
+  -e TRIO_CONTROL_HOST="host.docker.internal" -e TRIO_CONTROL_PORT="7929" -e TRIO_CONTROL_TOKEN="$TRIO_CONTROL_TOKEN" \
   aegis-code:latest web >/dev/null
 
 sleep 3

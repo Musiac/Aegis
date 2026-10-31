@@ -8,7 +8,7 @@ import json
 import os
 
 _HOST = os.getenv("TRIO_CONTROL_HOST", "host.docker.internal")
-_PORT = int(os.getenv("TRIO_CONTROL_PORT", "7909"))
+_PORT = int(os.getenv("TRIO_CONTROL_PORT", "7929"))
 _TOKEN = os.environ.get("TRIO_CONTROL_TOKEN", "")
 
 

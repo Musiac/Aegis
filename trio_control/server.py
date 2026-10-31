@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOKEN = os.environ["TRIO_CONTROL_TOKEN"]
 REPO_ROOT = os.environ["AEGIS_REPO_ROOT"]
-PORT = int(os.environ.get("TRIO_CONTROL_PORT", "7909"))
+PORT = int(os.environ.get("TRIO_CONTROL_PORT", "7929"))
 # How long the trio may sit idle (no /start or /touch call) before the reaper tears it down. Deliberately not
 # tied to export_project succeeding -- a real task often exports, then still needs the sandbox again right
 # after (append_doc_to_export attaching a report into the same zip, or a further fix/re-scan round), so
