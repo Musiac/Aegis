@@ -79,25 +79,28 @@ docker run -d --name aegis-libraries --network aegis-net --read-only --tmpfs /tm
   -e REDTEAM_TOKEN="$REDTEAM_TOKEN" -e GITHUB_CLONE_TOKEN="$GITHUB_CLONE_TOKEN" -e PENTESTLIVE_TOKEN="$PENTESTLIVE_TOKEN" \
   -p 127.0.0.1:7907:7907 aegis-libraries:latest >/dev/null
 
-# --- sandbox: the isolated code sandbox fixredteam/fixpentest write real fixes in (--network none) ---
-# aegis-sock is a Docker-managed NAMED VOLUME, not a host bind mount -- AF_UNIX sockets cannot be
-# bound inside a bind-mounted host directory on Docker Desktop (macOS: osxfs/virtiofs returns ENOTSUP,
-# confirmed live). backend/'s own container (built below) mounts this same volume to reach it. The image itself
-# was built above, before the self working copy was seeded.
-docker rm -f aegis-sandbox aegis-sandbox-proxy >/dev/null 2>&1 || true
+# --- sandbox trio: ephemeral (2026-10-31). aegis-sandbox + aegis-sandbox-proxy + aegis-sandbox-web are no
+# longer created here directly -- trio_control/start_trio.sh is the one real place those `docker run` commands
+# live now, called both by this install script (so a fresh install still ends with a running trio, same as
+# before) and by trio_control/server.py's lazy-start/idle-reaper (so there's never two copies of these
+# commands to keep in sync). aegis-sock is a Docker-managed NAMED VOLUME, not a host bind mount -- AF_UNIX
+# sockets cannot be bound inside a bind-mounted host directory on Docker Desktop (macOS: osxfs/virtiofs
+# returns ENOTSUP, confirmed live).
 docker volume create aegis-sock >/dev/null; docker volume create aegis-work >/dev/null
-docker run -d --name aegis-sandbox-proxy --restart unless-stopped --init --read-only --tmpfs /tmp:size=16m --cap-drop ALL \
-  --security-opt no-new-privileges --memory 256m --pids-limit 64 --cpus 0.5 -v aegis-sock:/sock aegis-sandbox:latest proxy >/dev/null
-# ,exec on /tmp: HOME=/tmp/home, and npx-style tools (npm-check-updates etc.) download then directly execve() a binary under
-# $HOME/.npm/_npx/... -- Docker's --tmpfs default is noexec, which silently turned every such call into "Permission denied" the
-# instant npm/Node were added to this image. Does not weaken the sandbox's real boundaries (--network none, cap-drop ALL, the
-# resource caps below) -- a model that can already run arbitrary bash_run/repl_run code can trivially read-then-interpret a
-# noexec file anyway, so noexec here was never a meaningful control, just an unexamined default.
-docker run -d --name aegis-sandbox --restart unless-stopped --init --network none --read-only --tmpfs /tmp:size=1g,mode=1777,exec \
-  --cap-drop ALL --security-opt no-new-privileges --memory 4g --oom-score-adj 1000 --pids-limit 256 --cpus 2 \
-  -v aegis-sock:/sock -v aegis-work:/REPL -v "$(pwd)/aegis_out:/aegis_out" \
-  -v "$(pwd)/src/self:/self_pristine:ro" -v "$(pwd)/self_target:/self_target" \
-  -v "$(pwd)/dynamic_pristine:/dynamic_pristine:ro" -v "$(pwd)/dynamic_target:/dynamic_target" aegis-sandbox:latest sandbox >/dev/null
+
+# --- trio_control: the host-side (never containerized) process that creates/destroys the trio on demand.
+# aegis-code has no docker.sock -- this is deliberately the ONLY thing on this machine with real `docker`
+# access for the trio, and it exposes exactly start/stop/status/touch, never a generic Docker API. Binds
+# 127.0.0.1 only; aegis-code reaches it over host.docker.internal (Docker Desktop's bridge-to-host DNS name).
+grep -q '^TRIO_CONTROL_TOKEN=' "$ENV_FILE" || echo "TRIO_CONTROL_TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" >> "$ENV_FILE"
+TRIO_CONTROL_TOKEN=$(grep '^TRIO_CONTROL_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
+mkdir -p logs
+if ! curl -s -o /dev/null "http://127.0.0.1:7909/status"; then
+  TRIO_CONTROL_TOKEN="$TRIO_CONTROL_TOKEN" AEGIS_REPO_ROOT="$(pwd)" nohup python3 trio_control/server.py >> logs/trio_control.log 2>&1 &
+  disown
+  for i in $(seq 1 20); do curl -s -o /dev/null "http://127.0.0.1:7909/status" && break; sleep 0.5; done
+fi
+bash trio_control/start_trio.sh
 
 # NOTE on kokoro/: a local Kokoro-82M TTS container (kokoro/Dockerfile, backend's /api/tts_kokoro) was built
 # 2026-10-29, then NOT wired in here the same day -- Meta's hackathon organizers ruled it out ("Every model
@@ -109,25 +112,13 @@ docker run -d --name aegis-sandbox --restart unless-stopped --init --network non
 # --- aegis-code: image already built above, for Trivy. The web UI runs as a real daemon (:8900); the CLI stays interactive. ---
 # AEGIS_REDTEAM_URL/AEGIS_PENTESTLIVE_URL point at the SAME container (aegis-net's own DNS), not
 # 127.0.0.1 -- each container has its own network namespace on a bridge network, unlike --network host.
+# TRIO_CONTROL_* point aegis-code at the host-side control plane over host.docker.internal (Docker Desktop's
+# bridge-to-host DNS name) -- see trio_control/server.py and aegis-code/tools/trio_client.py.
 docker rm -f aegis-code >/dev/null 2>&1 || true
 docker run -d --name aegis-code --network aegis-net -p 8900:8900 -v aegis-sock:/sock --env-file .env --restart unless-stopped \
   -e AEGIS_REDTEAM_URL="http://aegis-libraries:7906" -e AEGIS_PENTESTLIVE_URL="http://aegis-libraries:7907" \
+  -e TRIO_CONTROL_HOST="host.docker.internal" -e TRIO_CONTROL_PORT="7909" -e TRIO_CONTROL_TOKEN="$TRIO_CONTROL_TOKEN" \
   aegis-code:latest web >/dev/null
-
-# sandbox-web: hosts a cloned project's own server as www.sandbox.com:8900 for active pentest, plus the local
-# OpenAI stub on :8901 (added 2026-10-30). Reuses the aegis-code image (needs its nodejs/npm for npm installs) --
-# a plain `docker restart` after only rebuilding THIS image does NOT pick up new binaries baked into aegis-code;
-# recreate it (this command) instead. control.py is bind-mounted read-only so editing it alone is picked up by a
-# restart. This container was run by hand for a while without ever being added here -- added now so a fresh
-# `install.sh` run (or a future "did a restart really pick this up" doubt) has one canonical source, same as
-# every other container. mkdir -p guards a fresh clone that never ran this before.
-mkdir -p sandbox_web/pip_cache sandbox_web/npm_cache
-docker rm -f aegis-sandbox-web >/dev/null 2>&1 || true
-docker run -d --name aegis-sandbox-web --network aegis-net --network-alias www.sandbox.com --restart unless-stopped \
-  -v "$(pwd)/sandbox_web/control.py:/control/control.py:ro" \
-  -v "$(pwd)/dynamic_target:/dynamic_target:ro" -v "$(pwd)/self_target:/self_target:ro" \
-  -v "$(pwd)/sandbox_web/pip_cache:/pip_cache" -v "$(pwd)/sandbox_web/npm_cache:/npm_cache" \
-  --entrypoint python3 aegis-code:latest -u /control/control.py >/dev/null
 
 sleep 3
 echo "--- aegis-libraries (redteam) ---";   docker exec aegis-libraries curl -s http://127.0.0.1:7906/health; echo

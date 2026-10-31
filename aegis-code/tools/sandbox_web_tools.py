@@ -9,6 +9,7 @@ import json
 
 import httpx
 
+from . import trio_client
 from .narration import narrate
 
 CONTROL_URL = "http://aegis-sandbox-web:7999"
@@ -17,14 +18,29 @@ APP_PORT = 8900
 STUB_PORT = 8901
 
 
+async def _raw_call(path: str, body: dict = None) -> dict:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(35.0, connect=5.0)) as c:
+        r = (await c.post(f"{CONTROL_URL}{path}", json=body or {})) if body is not None else (await c.get(f"{CONTROL_URL}{path}"))
+    return r.json()
+
+
 async def _call(path: str, body: dict = None) -> dict:
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(35.0, connect=5.0)) as c:
-            r = (await c.post(f"{CONTROL_URL}{path}", json=body or {})) if body is not None else (await c.get(f"{CONTROL_URL}{path}"))
-        return r.json()
-    except httpx.HTTPError as e:
-        return {"ok": False, "error": f"could not reach the sandbox-web control plane ({type(e).__name__}): is the aegis-sandbox-web "
-                                       f"container running? See sandbox_web/README.md for the docker run command."}
+        result = await _raw_call(path, body)
+        trio_client.touch()
+        return result
+    except httpx.HTTPError:
+        # Same ephemeral-trio lazy-start as sandbox_tools.py's _call: aegis-sandbox-web not answering is the
+        # normal state between tasks, not an error -- start the trio and retry exactly once.
+        started = trio_client.start_trio()
+        if not started.get("ok"):
+            return {"ok": False, "error": f"Could not start the code sandbox: {started.get('error', 'unknown error')}"}
+        try:
+            result = await _raw_call(path, body)
+            trio_client.touch()
+            return result
+        except httpx.HTTPError as e:
+            return {"ok": False, "error": f"could not reach the sandbox-web control plane after starting it ({type(e).__name__})."}
 
 
 def _note(d: dict, verb: str) -> dict:

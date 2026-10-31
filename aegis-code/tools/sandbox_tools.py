@@ -12,6 +12,7 @@ import os
 import re
 import socket
 
+from . import trio_client
 from .narration import narrate
 
 _SOCK = os.getenv("AEGIS_SANDBOX_SOCK", "/sock/exec.sock")
@@ -28,18 +29,33 @@ class _UnixConn(http.client.HTTPConnection):
         self.sock.connect(self._path)
 
 
+def _raw_call(method: str, path: str, body: dict, timeout: float):
+    conn = _UnixConn(_SOCK, timeout)
+    conn.request(method, path, body=json.dumps(body) if body is not None else None, headers={"Content-Type": "application/json"})
+    resp = conn.getresponse()
+    data = json.loads(resp.read() or b"{}")
+    conn.close()
+    return data
+
+
 def _call(method: str, path: str, body: dict = None, timeout: float = 60.0) -> dict:
-    if not os.path.exists(_SOCK):
-        return {"error": "The code sandbox is not available (no sandbox socket)."}
     try:
-        conn = _UnixConn(_SOCK, timeout)
-        conn.request(method, path, body=json.dumps(body) if body is not None else None, headers={"Content-Type": "application/json"})
-        resp = conn.getresponse()
-        data = json.loads(resp.read() or b"{}")
-        conn.close()
-        return data
-    except Exception as e:                                                        # noqa: BLE001
-        return {"error": f"The code sandbox did not answer ({type(e).__name__})."}
+        result = _raw_call(method, path, body, timeout)
+        trio_client.touch()
+        return result
+    except Exception:                                                              # noqa: BLE001
+        # Never trust os.path.exists(_SOCK) alone: the trio is ephemeral but aegis-sock is a persistent named
+        # volume, so a stale socket FILE from the last, now-destroyed sandbox container still exists on disk --
+        # os.path.exists would wrongly report "up" with nothing listening. A real connect failure (refused /
+        # no such file) is the only reliable "the trio isn't here" signal, so that's what triggers the lazy
+        # start. Retry exactly once -- a genuinely broken trio must still surface as a real error, not hang.
+        started = trio_client.start_trio()
+        if not started.get("ok"):
+            return {"error": f"Could not start the code sandbox: {started.get('error', 'unknown error')}"}
+        try:
+            return _raw_call(method, path, body, timeout)
+        except Exception as e:                                                     # noqa: BLE001
+            return {"error": f"The code sandbox did not answer after starting ({type(e).__name__})."}
 
 
 async def repl_run(args: dict, ctx: dict) -> str:
