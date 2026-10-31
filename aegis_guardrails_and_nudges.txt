@@ -1,0 +1,35 @@
+Aegis -- guardrails and nudges that keep a task on track end-to-end
+
+1. Task-completion nudges:
+   1. Billing-disclosure guard -- tells model to continue after disclosure-only round.
+   2. "You haven't fixed anything yet" nudge -- forces edit_file when findings exist.
+   3. "Fixed but never finished" nudge -- forces export + report after a fix.
+   4. Nudge count cap -- at most one of each nudge per turn.
+   5. Server-start-give-up guard -- stops retrying a server after 2 failures.
+   6. MAX_ROUNDS hard ceiling -- turn can never run truly unbounded.
+   7. Deliverable-gap decided before "Completed" footer -- no premature done message.
+
+2. Model/billing safety:
+   1. Contributor-tier fail-closed downgrade -- auto-switches off Contributor for private targets.
+   2. Downgrade narration -- tells operator when and why the switch happened.
+   3. Pre-clone private-repo warning -- refuses to clone before asking first.
+   4. Immediate "no" honored -- answer read directly, cancels with zero further work.
+   5. Busy/stop outranks warning gate -- stop can't be swallowed by a confirm prompt.
+   6. Sticky confirmation -- never re-asks the same operator twice in a session.
+
+3. Capacity/resource guards:
+   1. Pre-clone size check -- checks repo size and quota before cloning.
+   2. Real-time disk watcher -- kills a command that overshoots the cap mid-run.
+   3. Housekeeping bypass -- cleanup commands exempt from the full-disk block.
+   4. No silent re-wipe -- re-cloning keeps existing fixes unless reset=true.
+
+4. Accuracy/honest-reporting guards:
+   1. Code-computed tallies -- model must copy scan numbers exactly, never estimate.
+   2. Word-report count check -- rejects a report whose numbers don't match the scan.
+   3. Never re-narrate rule -- stops the model repeating an already-reported fact.
+   4. Deterministic terminal narration -- code announces each phase, not the model.
+
+5. Guaranteed cleanup/delivery:
+   1. Sandbox app auto-stop -- server stopped in code the moment a report ships.
+   2. Report-in-zip -- Word report also saved inside the export zip.
+   3. Fresh scratch per session -- scratch space cleared at every new connect.
