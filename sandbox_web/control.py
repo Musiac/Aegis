@@ -93,20 +93,30 @@ def _wait_ready(port: int, seconds: float) -> bool:
 
 
 _DEP_INSTALL_TIMEOUT_S = 180
-# Persistent, NON-ephemeral caches for pip/npm (added 2026-10-30) -- bind-mounted from the host (see sandbox_web/README.md's docker run
-# command), so they survive this container being deleted and recreated, same spirit as /REPL/.uvcache for the code sandbox. pip/npm both
-# already skip re-downloading a package version already sitting in their own cache, so the SECOND time any repo (or a different repo that
-# happens to share a dependency) needs e.g. requests==2.34.2, it's a cache hit, not a fresh PyPI/npm-registry fetch -- only genuinely new
-# package/version combinations ever get downloaded again.
-PIP_CACHE_DIR = os.environ.get("PIP_CACHE_DIR", "/pip_cache")
-NPM_CACHE_DIR = os.environ.get("NPM_CONFIG_CACHE", "/npm_cache")
-_INSTALL_ENV = dict(os.environ, PIP_CACHE_DIR=PIP_CACHE_DIR, NPM_CONFIG_CACHE=NPM_CACHE_DIR)
+# Shared, NON-ephemeral caches for uv (Python) and npm (added 2026-10-30, unified onto the code sandbox's own
+# shared caches 2026-10-31) -- aegis-work, the SAME named volume the code sandbox mounts at /REPL, is also
+# mounted into THIS container at /REPL-shared (see trio_control/start_trio.sh), pointed at the exact same
+# /.uvcache and /.npm-cache subdirectories sandbox/exec_server.py's USER_ENV already uses. A package either
+# container's installs already fetched is now a real cache hit for the OTHER one too -- not just "persistent
+# across this container's own restarts" (the old /pip_cache /npm_cache bind-mount design), but genuinely
+# shared between the code sandbox and this one. Switched from plain `pip` to `uv pip install --system` (this
+# image's own Dockerfile now installs uv) specifically BECAUSE plain pip's own on-disk cache format is not
+# uv's -- pointing pip at uv's cache directory would not have made pip actually reuse anything in it; uv is
+# the one thing both containers can genuinely share.
+UV_CACHE_DIR = os.environ.get("UV_CACHE_DIR", "/REPL-shared/.uvcache")
+NPM_CACHE_DIR = os.environ.get("NPM_CONFIG_CACHE", "/REPL-shared/.npm-cache")
+_INSTALL_ENV = dict(os.environ, UV_CACHE_DIR=UV_CACHE_DIR, NPM_CONFIG_CACHE=NPM_CACHE_DIR, UV_PYTHON_DOWNLOADS="never")
 
 
 def _run_install(cmd: list, root: str, buf: list) -> None:
     buf.append(f"[deps] running: {' '.join(cmd)}")
     try:
-        p = subprocess.run(cmd, cwd=root, env=_INSTALL_ENV, capture_output=True, text=True, timeout=_DEP_INSTALL_TIMEOUT_S)
+        # umask 0 (via preexec_fn) for install subprocesses ONLY, not this whole process: this container runs as
+        # root, but the code sandbox (uid 1001) shares these same cache directories -- a root-written cache entry
+        # with pip/uv's normal 644/755 default mode would be read-only to uid 1001, so a later write/overwrite
+        # from that side could fail with a real "Permission denied" months from now, long after this looked fine.
+        p = subprocess.run(cmd, cwd=root, env=_INSTALL_ENV, capture_output=True, text=True, timeout=_DEP_INSTALL_TIMEOUT_S,
+                            preexec_fn=lambda: os.umask(0))
         buf.append(f"[deps] exit code {p.returncode}")
         if p.returncode != 0:
             buf.append((p.stderr or p.stdout or "")[-2000:])
@@ -121,13 +131,14 @@ def _install_deps(root: str, buf: list) -> None:
     real outbound internet for exactly this, per this file's own module docstring, but nothing ever actually ran pip/npm until now). Never
     blocks or fails startup on its own -- recorded into buf (the same log the operator sees via sandbox_app_status / a startup error), so a
     real install failure is visible, never silently swallowed. Runs BOTH Python and npm installs when both manifests are present (a repo
-    can have a Python backend AND a React/npm frontend) -- this is not an either/or choice."""
+    can have a Python backend AND a React/npm frontend) -- this is not an either/or choice. Python deps go through `uv pip install --system`
+    (2026-10-31, see the cache comment above) -- `--system` because this container, unlike the code sandbox, has no venv for uv to target."""
     did_any = False
     if os.path.isfile(os.path.join(root, "requirements.txt")):
-        _run_install(["pip", "install", "--quiet", "--no-input", "--disable-pip-version-check", "-r", "requirements.txt"], root, buf)
+        _run_install(["uv", "pip", "install", "--system", "--quiet", "-r", "requirements.txt"], root, buf)
         did_any = True
     elif os.path.isfile(os.path.join(root, "pyproject.toml")) or os.path.isfile(os.path.join(root, "setup.py")):
-        _run_install(["pip", "install", "--quiet", "--no-input", "--disable-pip-version-check", "-e", "."], root, buf)
+        _run_install(["uv", "pip", "install", "--system", "--quiet", "-e", "."], root, buf)
         did_any = True
     if os.path.isfile(os.path.join(root, "package.json")):
         npm_cmd = ["npm", "ci", "--no-audit", "--no-fund"] if os.path.isfile(os.path.join(root, "package-lock.json")) else \

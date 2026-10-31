@@ -14,6 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm && r
 WORKDIR /app
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
+# uv (added 2026-10-31): sandbox_web/control.py (this image's own sandbox-web runtime, see the note above) now
+# installs a cloned project's Python deps with `uv pip install --system` instead of plain pip, pointed at the
+# SAME shared /REPL/.uvcache the code sandbox already uses (over aegis-work, a volume this container now also
+# mounts) -- so a package either container already fetched is a cache hit for the other, not a second
+# real PyPI download. Same install method sandbox/Dockerfile already uses.
+RUN pip install --no-cache-dir uv
 COPY . /app/backend/
 ENV PYTHONPATH=/app
 EXPOSE 8900

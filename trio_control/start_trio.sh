@@ -13,12 +13,14 @@ docker run -d --name aegis-sandbox --restart unless-stopped --init --network non
   -v "$(pwd)/src/self:/self_pristine:ro" -v "$(pwd)/self_target:/self_target" \
   -v "$(pwd)/dynamic_pristine:/dynamic_pristine:ro" -v "$(pwd)/dynamic_target:/dynamic_target" aegis-sandbox:latest sandbox >/dev/null
 
-mkdir -p sandbox_web/pip_cache sandbox_web/npm_cache
+# aegis-work mounted at /REPL-shared, NOT /REPL (that path is the code sandbox's own full working directory,
+# this container only ever needs its 2 cache subdirs -- see sandbox_web/control.py's own comment on why this
+# replaced the old, separate sandbox_web/pip_cache+npm_cache host bind mounts 2026-10-31).
 docker rm -f aegis-sandbox-web >/dev/null 2>&1 || true
 docker run -d --name aegis-sandbox-web --network aegis-net --network-alias www.sandbox.com --restart unless-stopped \
   -v "$(pwd)/sandbox_web/control.py:/control/control.py:ro" \
   -v "$(pwd)/dynamic_target:/dynamic_target:ro" -v "$(pwd)/self_target:/self_target:ro" \
-  -v "$(pwd)/sandbox_web/pip_cache:/pip_cache" -v "$(pwd)/sandbox_web/npm_cache:/npm_cache" \
+  -v aegis-work:/REPL-shared \
   --entrypoint python3 aegis-code:latest -u /control/control.py >/dev/null
 
 # Give the exec socket server a moment to bind before the first bash_run's socket connect. Checked via

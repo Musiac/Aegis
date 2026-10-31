@@ -6,8 +6,6 @@ dynamic_pristine/
 dynamic_target/
 redteam_tool_updates/
 images/
-sandbox_web/pip_cache/
-sandbox_web/npm_cache/
 logs/
 __pycache__/
 *.pyc

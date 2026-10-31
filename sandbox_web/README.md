@@ -49,7 +49,7 @@ own `uvicorn backend.web:app --port 8900` as a tracked child process.
   own dependencies are not already in the `aegis-code` image — that failure is
   reported plainly by the control API, never swallowed.
 
-## Start it (once; `--restart unless-stopped` keeps it up after that)
+## Start it (now ephemeral -- see trio_control/start_trio.sh, the one real place this container is created)
 
 ```bash
 cd ~/GenAI/Aegis   # or wherever this repo is checked out
@@ -59,19 +59,24 @@ docker run -d --name aegis-sandbox-web \
   -v "$(pwd)/sandbox_web/control.py:/control/control.py:ro" \
   -v "$(pwd)/dynamic_target:/dynamic_target:ro" \
   -v "$(pwd)/self_target:/self_target:ro" \
-  -v "$(pwd)/sandbox_web/pip_cache:/pip_cache" \
-  -v "$(pwd)/sandbox_web/npm_cache:/npm_cache" \
+  -v aegis-work:/REPL-shared \
   --entrypoint python3 \
   aegis-code:latest -u /control/control.py
 ```
 
-`pip_cache/`/`npm_cache/` (added 2026-10-30) are plain host directories, NOT inside any
-container's ephemeral storage — deleting/recreating this container (or `aegis-sandbox`,
-or the `aegis-code`/`aegis-sandbox`/`aegis-libraries` images) never loses them.
-`_install_deps` in `control.py` points `PIP_CACHE_DIR`/`NPM_CONFIG_CACHE` at them, so a
-package version already downloaded once (for ANY repo, not just the one that first pulled
-it) is reused straight from disk on every later `requirements.txt`/`package.json` install
--- only a genuinely new package or version actually hits PyPI/the npm registry again.
+`aegis-work` (unified onto the code sandbox's own cache volume 2026-10-31, replacing the
+old separate `sandbox_web/pip_cache`/`npm_cache` host directories) is the SAME named volume
+`aegis-sandbox` mounts at `/REPL` -- mounted here at `/REPL-shared` instead, since this
+container only needs its 2 cache subdirectories (`.uvcache`, `.npm-cache`), not the rest of
+the code sandbox's own working directory. `_install_deps` in `control.py` points
+`UV_CACHE_DIR`/`NPM_CONFIG_CACHE` at them (Python installs go through `uv pip install
+--system` now, not plain `pip` -- pip's own cache format isn't uv's, so pointing plain pip
+at this directory would never have actually been a cache hit), so a package version either
+container's installs already fetched (for ANY repo, not just the one that first pulled it)
+is reused straight from disk on the other side too -- only a genuinely new package or
+version actually hits PyPI/the npm registry again. Being a named volume (not a host bind
+mount), deleting/recreating this container, `aegis-sandbox`, or any of the 3 images never
+loses it either.
 
 Rebuilding `aegis-code:latest` for an unrelated reason does not need this
 container recreated — it only reuses that image for its installed dependencies and never
