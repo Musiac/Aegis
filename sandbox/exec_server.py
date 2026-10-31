@@ -121,6 +121,15 @@ USER_ENV = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": "/REPL/.pkgs:/opt/
             "LANG": "C.UTF-8", "PYTHONUNBUFFERED": "1",
             "UV_CACHE_DIR": "/REPL/.uvcache",
             "UV_PYTHON_DOWNLOADS": "never", "UV_PYTHON": "/opt/base-venv/bin/python", "MPLBACKEND": "Agg",
+            # npm had NO cache redirect at all until now (2026-10-31, real incident with the ephemeral sandbox
+            # trio: npm's own default cache is $HOME/.npm, i.e. /tmp/home/.npm, the SAME RAM-backed tmpfs
+            # UV_CACHE_DIR was moved off of for exactly this reason -- wiped on every container recreate, which
+            # now happens routinely (idle-reaped every ~5 minutes), so every `npm install` would re-download its
+            # whole dependency tree from scratch on every single task instead of reusing what an earlier task
+            # already fetched. Same fix, same pattern: redirect to /REPL/.npm-cache, backed by the persistent
+            # aegis-work volume. npm's own cache is already content-addressed/checksum-verified, so pointing
+            # multiple repos' installs at one shared cache dir is exactly what it's designed for.
+            "NPM_CONFIG_CACHE": "/REPL/.npm-cache", "npm_config_cache": "/REPL/.npm-cache",
             "HTTP_PROXY": "http://127.0.0.1:3128", "HTTPS_PROXY": "http://127.0.0.1:3128", "http_proxy": "http://127.0.0.1:3128", "https_proxy": "http://127.0.0.1:3128"}
 
 
@@ -143,7 +152,7 @@ def _dir_bytes(path: str) -> int:
     return total
 
 
-_CACHE_DIR_NAMES = {".pkgs", ".uvcache"}   # reusable install caches (pip/uv) -- never scratch, see do_cleanup's own comment. Excluded here too so
+_CACHE_DIR_NAMES = {".pkgs", ".uvcache", ".npm-cache"}   # reusable install caches (pip/uv/npm) -- never scratch, see do_cleanup's own comment. Excluded here too so
                                              # their natural growth across sessions can never trip REPL_CAP_BYTES and brick bash_run/repl_run --
                                              # a real incident, 2026-10-30: .uvcache alone grew past the whole 400MB cap from ordinary tool installs,
                                              # and every bash_run (even `echo hi`) then failed closed, including the `rm` needed to free space --
@@ -401,8 +410,8 @@ def do_cleanup(_req: dict) -> tuple:
     scratch disk every bash_run/repl_run writes into -- see REPL_CAP_BYTES above), every stale /dynamic_target/<name> working copy (nothing
     reuses one across browser sessions -- new_session() in backend/web.py starts fresh every reconnect, so anything here is an orphan from a
     prior session), and /aegis_out beyond the newest AEGIS_OUT_KEEP exports (every finished export_project/create_word_document lands here and
-    nothing has ever pruned it). /REPL/.pkgs and /REPL/.uvcache are deliberately left alone -- they are reusable install caches, not scratch,
-    and wiping them would just force every future pip/npm install to redo real network work. Exempt from REPL_CAP_BYTES on purpose: this is the
+    nothing has ever pruned it). /REPL/.pkgs, /REPL/.uvcache and /REPL/.npm-cache are deliberately left alone -- they are reusable install
+    caches, not scratch, and wiping them would just force every future pip/npm install to redo real network work. Exempt from REPL_CAP_BYTES on purpose: this is the
     one operation that must still work when /REPL is already full (that is exactly the state it exists to recover from).
 
     ALSO clears /tmp/home's scratch contents (added 2026-10-30, same incident as the UV_CACHE_DIR move above): HOME=/tmp/home is a RAM-backed

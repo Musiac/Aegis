@@ -28,7 +28,11 @@ mkdir -p src/self self_target aegis_out dynamic_pristine dynamic_target redteam_
 # and redteam then scans that SAME dir read-only at /src_dynamic/<name> -- see aegis-libraries/redteam_server.py's own docstring.
 # .env is excluded: it holds the LLM keys and tool tokens, and the sandbox (which can read and export this copy)
 # must never see a secret.
-rsync -a --delete --exclude ".git" --exclude ".env" --exclude "__pycache__" --exclude "src" --exclude "self_target" --exclude "aegis_out" --exclude "dynamic_pristine" --exclude "dynamic_target" ./ src/self/
+# images/ and redteam_tool_updates/ excluded (2026-10-31, real finding): docker save tarballs (1.8GB+) and live scanner-tool
+# binaries (285MB), both regenerated/updated independently of source and neither ever excluded before -- with no exclude, both
+# got copied into src/self/ then self_target/self/ on every run, alone enough to blow past the sandbox's /REPL quota before any
+# real work started. logs/ excluded too -- trio_control.log and friends are runtime output, not source.
+rsync -a --delete --exclude ".git" --exclude ".env" --exclude "__pycache__" --exclude "src" --exclude "self_target" --exclude "aegis_out" --exclude "dynamic_pristine" --exclude "dynamic_target" --exclude "images" --exclude "redteam_tool_updates" --exclude "logs" ./ src/self/
 
 # The containers run as fixed, non-root uids -- the sandbox as 1001 (sandbox/Dockerfile), redteam as 1000
 # (redteam/Dockerfile) -- but the host dirs they write to were just created by whoever ran this script, usually a
