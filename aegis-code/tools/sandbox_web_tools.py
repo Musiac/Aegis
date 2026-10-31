@@ -35,6 +35,13 @@ async def _call(path: str, body: dict = None) -> dict:
         started = trio_client.start_trio()
         if not started.get("ok"):
             return {"ok": False, "error": f"Could not start the code sandbox: {started.get('error', 'unknown error')}"}
+        # Same hard gate as sandbox_tools.py's lazy-start path (owner's own instruction, 2026-10-31): the safety
+        # check runs right after the trio is created, and only on success does the operator's actual call proceed.
+        from .sandbox_verify import run_safety_gate
+        passed, reasons = run_safety_gate()
+        if not passed:
+            trio_client.stop_trio()
+            return {"ok": False, "error": f"The code sandbox failed its own safety check after starting, so no work ran in it: {reasons}"}
         try:
             result = await _raw_call(path, body)
             trio_client.touch()

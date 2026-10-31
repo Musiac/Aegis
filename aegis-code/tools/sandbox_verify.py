@@ -14,6 +14,7 @@ Three checks, each run for real and reported exactly as it comes back:
      of truth these numbers are read from live.
 """
 import json
+import re
 
 from .sandbox_tools import _call
 
@@ -51,10 +52,31 @@ CHECKS = [
 ]
 
 
-async def verify_sandbox_safety(args: dict, ctx: dict) -> str:
-    """Runs 3 REAL checks against the live sandbox container -- not claims, actual commands -- and reports exactly what each
-    one shows. Call this ONCE, right after the sandbox is confirmed up (the first bash_run/sandbox_app_start of a session),
-    before doing any real work in it, so the operator sees the isolation guarantees demonstrated, not just asserted."""
+def _evaluate(results: list) -> tuple:
+    """Real pass/fail judgment for the 3 checks -- the single source of truth both verify_sandbox_safety's own
+    reply and run_safety_gate's hard gate rely on (moved out of web.py's old greeting-only narration, 2026-10-31,
+    so a genuine isolation failure is a real, code-checked fact, never left to the model's own reading of raw
+    stdout). Returns (passed, reasons) -- reasons is a list of real, specific mismatches, empty when passed."""
+    by_check = {r["check"]: (r.get("raw") or {}) for r in results}
+    reasons = []
+    w = by_check.get("write_outside_sandbox", {})
+    w_out = (w.get("stdout") or "") + (w.get("stderr") or "")
+    if w_out.count("Read-only file system") < 2:
+        reasons.append(f"write_outside_sandbox: expected 'Read-only file system' twice (once per path tried), got {w_out[:200]!r}")
+    n = by_check.get("external_network", {})
+    n_out = n.get("stdout") or ""
+    m = re.search(r"exit_code=(\d+)", n_out)
+    if not (m and m.group(1) != "0"):
+        reasons.append(f"external_network: expected a nonzero curl exit code (network unreachable), got {n_out[:200]!r}")
+    c = by_check.get("resource_caps", {})
+    c_out = c.get("stdout") or ""
+    if not re.search(r"(memory\.max=\S+|pids\.max=\S+|cpu\.max=\S+)", c_out):
+        reasons.append(f"resource_caps: no real cgroup limit read back, got {c_out[:200]!r}")
+    return (not reasons), reasons
+
+
+async def _run_checks(ctx: dict = None) -> list:
+    ctx = ctx or {}
     results = []
     emit = ctx.get("emit_terminal_progress")
     emit_status = ctx.get("emit_status")   # the short transient "now doing X" line shown live next to the busy
@@ -72,13 +94,45 @@ async def verify_sandbox_safety(args: dict, ctx: dict) -> str:
         results.append({"check": c["key"], "cmd": c["cmd"], "raw": raw})
     if emit_status:
         await emit_status("")   # clears the transient line once all 3 checks are done
+    return results
+
+
+async def verify_sandbox_safety(args: dict, ctx: dict) -> str:
+    """Runs 3 REAL checks against the live sandbox container -- not claims, actual commands -- and reports exactly what each
+    one shows, plus a real, code-computed pass/fail. Call this ONCE, right after the sandbox is confirmed up (the first
+    bash_run/sandbox_app_start of a session), before doing any real work in it, so the operator sees the isolation
+    guarantees demonstrated, not just asserted. run_safety_gate() below already runs this same check automatically the
+    moment the ephemeral trio is freshly created, and refuses to proceed with the operator's task if it fails -- this
+    tool stays separately callable for an explicit, narrated re-check mid-session."""
+    results = await _run_checks(ctx)
+    passed, reasons = _evaluate(results)
     return json.dumps({
         "ok": True,
+        "passed": passed,
+        "reasons": reasons,
         "note": (
-            "Each check above is a REAL command that ran just now inside THIS session's own sandbox container -- report "
-            "exactly what its stdout/stderr/exit_code show, never invent or assume a result. The resource_caps check "
-            "deliberately reads the enforced limits rather than trying to exhaust them (that would crash the sandbox "
-            "needed for the rest of this session) -- say that plainly rather than implying a crash test was run."
+            "Each check above is a REAL command that ran just now inside THIS session's own sandbox container -- `passed` "
+            "and `reasons` are a real, code-computed verdict, not something to re-derive from the raw stdout yourself. "
+            "Report `passed` plainly; if it's false, name exactly which check(s) failed and why, from `reasons`, never "
+            "soften or omit a failure. The resource_caps check deliberately reads the enforced limits rather than trying "
+            "to exhaust them (that would crash the sandbox needed for the rest of this session) -- say that plainly "
+            "rather than implying a crash test was run."
         ),
         "results": results,
     })
+
+
+def run_safety_gate() -> tuple:
+    """The hard gate: runs the exact same 3 checks, no narration, right after sandbox_tools._call lazy-starts a fresh
+    trio and before the operator's actual task proceeds in it (owner's own instruction, 2026-10-31: the safety check
+    must happen after the sandbox trio is created, and only on success does real work start inside it). Deliberately
+    plain sync (not async like _run_checks/verify_sandbox_safety above): _call's lazy-start path is itself sync and
+    already runs inside an active event loop (called from async tool functions without await, same as every other
+    _call use), so an async gate here would need asyncio.run() from inside a running loop -- a guaranteed
+    RuntimeError. Returns (passed, reasons_text)."""
+    results = []
+    for c in CHECKS:
+        raw = _call("POST", "/run", {"kind": "bash", "code": c["cmd"], "name": "", "timeout": 10}, timeout=20)
+        results.append({"check": c["key"], "cmd": c["cmd"], "raw": raw})
+    passed, reasons = _evaluate(results)
+    return passed, "; ".join(reasons)

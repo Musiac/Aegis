@@ -36,9 +36,9 @@ from . import turnlog
 from .core import ProviderError, new_session, pick_provider, run_turn
 from .llm import available_providers, scan_fix_providers
 from .model_pricing import compute_asr_cost_usd, compute_gemini_tts_cost_usd
+from .tools import trio_client
 from .tools.redteam_tools import check_scanner_versions, cleanup_redteam_scratch
 from .tools.sandbox_tools import cleanup_sandbox_scratch
-from .tools.sandbox_verify import verify_sandbox_safety
 
 # muse-voice-transcribe-1.0's real cost isn't an LLM-token call, so it can't go through compute_cost_usd/session_cost_usd
 # the way core.run_turn's rounds do -- it's billed per second of audio, attributed to a push-to-talk utterance that
@@ -589,12 +589,18 @@ async def ws_endpoint(ws: WebSocket):
     # is ever reused across a browser session (new_session() above starts fresh every reconnect), so this always deletes genuine
     # orphans, never anything the operator is mid-task on. See sandbox/exec_server.py's do_cleanup and aegis-libraries/redteam_server.py's
     # /cleanup_targets for what each actually removes.
-    try:
-        sandbox_result = await cleanup_sandbox_scratch({}, ctx)
-        await _send({"type": "terminal", "line": "-> cleanup_sandbox_scratch()"})
-        await _send({"type": "terminal", "line": f"   {sandbox_result[:600]}"})
-    except Exception as e:                                                       # noqa: BLE001 -- startup cleanup must never block the session from opening
-        await _send({"type": "terminal", "line": f"   cleanup_sandbox_scratch failed: {type(e).__name__}: {e}"})
+    # Skipped when the sandbox trio isn't already running (2026-10-31, ephemeral trio): cleanup_sandbox_scratch talks to the
+    # sandbox over the exec socket, which would otherwise lazy-start the whole trio on every single connect -- the operator should
+    # see only aegis-code/aegis-libraries at idle, including right after loading :8900, not have every page load silently spin up
+    # 3 more containers. Any stale /dynamic_target/<name> or /REPL/work left on the host-backed volumes from before the trio was
+    # last torn down gets cleaned the next time it genuinely starts (trio_control/start_trio.sh), not deferred forever.
+    if trio_client.trio_status().get("running"):
+        try:
+            sandbox_result = await cleanup_sandbox_scratch({}, ctx)
+            await _send({"type": "terminal", "line": "-> cleanup_sandbox_scratch()"})
+            await _send({"type": "terminal", "line": f"   {sandbox_result[:600]}"})
+        except Exception as e:                                                   # noqa: BLE001 -- startup cleanup must never block the session from opening
+            await _send({"type": "terminal", "line": f"   cleanup_sandbox_scratch failed: {type(e).__name__}: {e}"})
     try:
         redteam_result = await cleanup_redteam_scratch({}, ctx)
         await _send({"type": "terminal", "line": "-> cleanup_redteam_scratch()"})
@@ -865,33 +871,11 @@ async def _run_greeting(ws, messages, ctx, on_text, on_tool_call, _total_cost_us
         messages.append({"role": "assistant", "content": report})
     except Exception as e:                                                       # noqa: BLE001 -- a bad scanner-version check must never block the session from opening
         await ws.send_text(json.dumps({"type": "error", "text": f"Scanner version check failed: {type(e).__name__}: {e}"}))
-    try:
-        # Also automatic (restored 2026-10-30, owner's own instruction -- the operator expected this to still
-        # run at connect, same as before the greeting was shortened): a direct function call, same as
-        # check_scanner_versions above, not an LLM round -- verify_sandbox_safety's own emit_status calls
-        # already narrate each of its 3 checks simply in the chat pane as they run (see sandbox_verify.py); this
-        # just adds the one-line summary afterward, parsed directly from each check's own real, fixed-format
-        # output (never LLM-interpreted, so there is nothing for a model to invent or soften here).
-        vresult = await verify_sandbox_safety({}, ctx)
-        await on_tool_call("verify_sandbox_safety", {}, vresult)
-        parsed = json.loads(vresult)
-        by_check = {r.get("check"): (r.get("raw") or {}) for r in parsed.get("results", [])}
-        lines = []
-        w = by_check.get("write_outside_sandbox", {})
-        w_out = (w.get("stdout") or "") + (w.get("stderr") or "")
-        lines.append("- ✅ Can't write outside the sandbox (blocked: read-only)" if w_out.count("Read-only file system") >= 2
-                     else f"- ❓ Write-outside-sandbox check: unexpected output ({w_out[:120]!r})")
-        n = by_check.get("external_network", {})
-        n_out = n.get("stdout") or ""
-        m = re.search(r"exit_code=(\d+)", n_out)
-        lines.append("- ✅ Can't reach the internet (blocked: no network device)" if m and m.group(1) != "0"
-                     else f"- ❓ External-network check: unexpected output ({n_out[:120]!r})")
-        c = by_check.get("resource_caps", {})
-        c_out = c.get("stdout") or ""
-        caps = ", ".join(re.findall(r"(memory\.max=\S+|pids\.max=\S+|cpu\.max=\S+)", c_out)) or "unavailable"
-        lines.append(f"- ✅ Resource limits enforced: {caps}")
-        await on_text("Sandbox isolation verified with 3 live checks:\n\n" + "\n".join(lines))
-    except Exception as e:                                                       # noqa: BLE001 -- a bad sandbox check must never block the session from opening
-        await ws.send_text(json.dumps({"type": "error", "text": f"Sandbox safety check failed: {type(e).__name__}: {e}"}))
+    # verify_sandbox_safety is deliberately NOT run automatically here anymore (2026-10-31, Phase 2 of the
+    # sandbox-trio refactor): it talks to the sandbox over the exec socket, which would lazy-start the whole
+    # ephemeral trio on every single connect -- defeating the point of making it ephemeral (the operator should
+    # see 2 containers at idle, including right after loading :8900, not 5). It's still real and callable on
+    # request (system_prompt.py's own note covers that); it only runs when actually asked for, or naturally as
+    # part of working a real task that's already touching the sandbox anyway.
     await ws.send_text(json.dumps({"type": "cost", "total_usd": _total_cost_usd()}))
     await ws.send_text(json.dumps({"type": "done"}))

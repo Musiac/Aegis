@@ -38,24 +38,51 @@ def _raw_call(method: str, path: str, body: dict, timeout: float):
     return data
 
 
+_lazy_start_depth = 0   # re-entrancy guard: run_safety_gate() below calls back into _call(), which must never
+                        # itself attempt a SECOND lazy-start while the first one is still being verified.
+
+
 def _call(method: str, path: str, body: dict = None, timeout: float = 60.0) -> dict:
+    global _lazy_start_depth
     try:
         result = _raw_call(method, path, body, timeout)
         trio_client.touch()
         return result
     except Exception:                                                              # noqa: BLE001
-        # Never trust os.path.exists(_SOCK) alone: the trio is ephemeral but aegis-sock is a persistent named
-        # volume, so a stale socket FILE from the last, now-destroyed sandbox container still exists on disk --
-        # os.path.exists would wrongly report "up" with nothing listening. A real connect failure (refused /
-        # no such file) is the only reliable "the trio isn't here" signal, so that's what triggers the lazy
-        # start. Retry exactly once -- a genuinely broken trio must still surface as a real error, not hang.
-        started = trio_client.start_trio()
-        if not started.get("ok"):
-            return {"error": f"Could not start the code sandbox: {started.get('error', 'unknown error')}"}
+        if _lazy_start_depth > 0:
+            return {"error": "The code sandbox is not answering (already inside a lazy-start/safety-check attempt)."}
+        _lazy_start_depth += 1
         try:
-            return _raw_call(method, path, body, timeout)
-        except Exception as e:                                                     # noqa: BLE001
-            return {"error": f"The code sandbox did not answer after starting ({type(e).__name__})."}
+            return _lazy_start_and_retry(method, path, body, timeout)
+        finally:
+            _lazy_start_depth -= 1
+
+
+def _lazy_start_and_retry(method: str, path: str, body: dict, timeout: float) -> dict:
+    # Never trust os.path.exists(_SOCK) alone: the trio is ephemeral but aegis-sock is a persistent named
+    # volume, so a stale socket FILE from the last, now-destroyed sandbox container still exists on disk --
+    # os.path.exists would wrongly report "up" with nothing listening. A real connect failure (refused /
+    # no such file) is the only reliable "the trio isn't here" signal, so that's what triggers the lazy start.
+    started = trio_client.start_trio()
+    if not started.get("ok"):
+        return {"error": f"Could not start the code sandbox: {started.get('error', 'unknown error')}"}
+    # Owner's own instruction, 2026-10-31: the safety check must happen AFTER the 3 sandbox containers are
+    # created, and only on success does real work start inside it -- never skip straight to the operator's
+    # actual call just because start_trio() itself returned ok. A fresh trio that fails its own isolation
+    # check is torn back down rather than left running half-trusted.
+    from .sandbox_verify import run_safety_gate   # deferred: sandbox_verify imports _call from this module at
+                                                    # its own top level, so importing it back at THIS module's
+                                                    # top level would be circular.
+    passed, reasons = run_safety_gate()
+    if not passed:
+        trio_client.stop_trio()
+        return {"error": f"The code sandbox failed its own safety check after starting, so no work ran in it: {reasons}"}
+    try:
+        result = _raw_call(method, path, body, timeout)
+        trio_client.touch()
+        return result
+    except Exception as e:                                                         # noqa: BLE001
+        return {"error": f"The code sandbox did not answer after starting ({type(e).__name__})."}
 
 
 async def repl_run(args: dict, ctx: dict) -> str:
