@@ -1,5 +1,6 @@
 """Red-team tool server: the source-level scanners (gitleaks, Semgrep, Bandit, pip-audit, npm audit, Trivy) and OWASP ZAP, as a small bearer-token
-API the chat loop in backend/ calls. --network host is only needed for pip-audit/npm-audit's advisory-database lookups and ZAP's own HTTP traffic;
+API the chat loop in aegis-code/ calls. Runs on aegis-net (a bridge network with real egress), folded into the aegis-libraries image/container
+alongside pentestlive_server.py (merged 2026-10-31) -- see that image's Dockerfile for why neither process needs --network host.
 every scanner here reads only the read-only source mounts (/src_self/self, /src_dynamic/<name>) -- nothing accepts an arbitrary filesystem path.
 
 Targets, two kinds:

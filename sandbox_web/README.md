@@ -7,7 +7,7 @@ this; `pentest_zap` could only point at an address that was *already* running so
 
 ## What it is
 
-A tiny container, reusing the `aegis-backend:latest` image (so it already has
+A tiny container, reusing the `aegis-code:latest` image (so it already has
 uvicorn/fastapi/python-docx/etc. — the same deps Aegis's own app needs) but running
 only `sandbox_web/control.py` as its real process. That script is a small stdlib HTTP
 control plane (no new dependencies) on port 7999 that starts/stops/restarts the project's
@@ -15,7 +15,7 @@ own `uvicorn backend.web:app --port 8900` as a tracked child process.
 
 - **Network:** `aegis-net`, with `--network-alias www.sandbox.com` — so once an app
   is started, `pentest_zap`'s `target_url` should be exactly `http://www.sandbox.com:8900/`.
-  `aegis-redteam` (where ZAP actually runs) is on the same network and already
+  `aegis-libraries` (where ZAP actually runs) is on the same network and already
   resolves that name via Docker's own embedded DNS; nothing was added to any `/etc/hosts`.
 - **Source:** read-only mounts of the SAME host directories the code sandbox
   (`aegis-sandbox`) writes fixes into (`dynamic_target/`, `self_target/`) — a fix
@@ -46,7 +46,7 @@ own `uvicorn backend.web:app --port 8900` as a tracked child process.
   (`backend/web.py`, `uvicorn backend.web:app`) — which is exactly right for pentesting
   Aegis's own cloned code. A differently-shaped project needs an explicit `cmd`
   passed to `sandbox_app_start`/`sandbox_app_restart`, and may still fail to start if its
-  own dependencies are not already in the `aegis-backend` image — that failure is
+  own dependencies are not already in the `aegis-code` image — that failure is
   reported plainly by the control API, never swallowed.
 
 ## Start it (once; `--restart unless-stopped` keeps it up after that)
@@ -62,18 +62,18 @@ docker run -d --name aegis-sandbox-web \
   -v "$(pwd)/sandbox_web/pip_cache:/pip_cache" \
   -v "$(pwd)/sandbox_web/npm_cache:/npm_cache" \
   --entrypoint python3 \
-  aegis-backend:latest -u /control/control.py
+  aegis-code:latest -u /control/control.py
 ```
 
 `pip_cache/`/`npm_cache/` (added 2026-10-30) are plain host directories, NOT inside any
 container's ephemeral storage — deleting/recreating this container (or `aegis-sandbox`,
-or the `aegis-backend`/`aegis-sandbox`/`aegis-redteam` images) never loses them.
+or the `aegis-code`/`aegis-sandbox`/`aegis-libraries` images) never loses them.
 `_install_deps` in `control.py` points `PIP_CACHE_DIR`/`NPM_CONFIG_CACHE` at them, so a
 package version already downloaded once (for ANY repo, not just the one that first pulled
 it) is reused straight from disk on every later `requirements.txt`/`package.json` install
 -- only a genuinely new package or version actually hits PyPI/the npm registry again.
 
-Rebuilding `aegis-backend:latest` for an unrelated reason does not need this
+Rebuilding `aegis-code:latest` for an unrelated reason does not need this
 container recreated — it only reuses that image for its installed dependencies and never
 runs the image's own baked-in app code. **Exception (2026-10-30):** `docker restart` reuses
 the layers already materialized at creation time, so if the rebuild adds/changes something
@@ -84,8 +84,8 @@ a plain restart will NOT pick it up — stop+rm+re-run with this same command in
 
 ```bash
 docker logs aegis-sandbox-web                       # "listening on 0.0.0.0:7999, app port 8900"
-docker exec aegis-backend-web python3 -c "import urllib.request,json; print(json.load(urllib.request.urlopen('http://aegis-sandbox-web:7999/status')))"
-docker exec aegis-redteam python3 -c "import urllib.request; print(urllib.request.urlopen('http://www.sandbox.com:8900/', timeout=5).status)"   # only meaningful once something is started
+docker exec aegis-code python3 -c "import urllib.request,json; print(json.load(urllib.request.urlopen('http://aegis-sandbox-web:7999/status')))"
+docker exec aegis-libraries python3 -c "import urllib.request; print(urllib.request.urlopen('http://www.sandbox.com:8900/', timeout=5).status)"   # only meaningful once something is started
 ```
 
 ## The backend tools (`backend/tools/sandbox_web_tools.py`)

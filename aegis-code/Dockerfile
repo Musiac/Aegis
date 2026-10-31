@@ -1,15 +1,15 @@
-# backend: the chat loop, as a container so it can mount the same aegis-sock NAMED VOLUME the sandbox
-# uses (a plain host process can't -- AF_UNIX sockets fail to bind inside a bind-mounted host dir on Docker
-# Desktop/macOS). --network host to reach redteam (127.0.0.1:7906) and pentestlive (127.0.0.1:7907) the same
-# way curl does when testing them directly. Two commands:
+# aegis-code (renamed from backend/ 2026-10-31): the chat loop, as a container so it can mount the same aegis-sock
+# NAMED VOLUME the sandbox uses (a plain host process can't -- AF_UNIX sockets fail to bind inside a bind-mounted
+# host dir on Docker Desktop/macOS). Reaches aegis-libraries (redteam on :7906, pentestlive on :7907) over aegis-net
+# by container name, not 127.0.0.1 -- see AEGIS_REDTEAM_URL/AEGIS_PENTESTLIVE_URL in install.sh. Two commands:
 #   cli (default) -- interactive, not a daemon:
-#     docker run -it --rm --network host -v aegis-sock:/sock --env-file .env aegis-backend:latest
+#     docker run -it --rm --network aegis-net -v aegis-sock:/sock --env-file .env aegis-code:latest
 #   web -- the browser UI, a real daemon on :8900:
-#     docker run -d --name aegis-backend --network host -v aegis-sock:/sock --env-file .env --restart unless-stopped aegis-backend:latest web
+#     docker run -d --name aegis-code --network aegis-net -v aegis-sock:/sock --env-file .env --restart unless-stopped aegis-code:latest web
 FROM python:3.12-slim
 # nodejs/npm (added 2026-10-30): this image is ALSO reused, unmodified, as sandbox-web's own runtime (sandbox_web/control.py's
 # _install_deps) to install a cloned project's own npm dependencies before starting an npm/React/etc. UI, the same way it already
-# installs Python deps via pip -- harmless addition to the real aegis-backend-web container too, just unused binaries there.
+# installs Python deps via pip -- harmless addition to the real aegis-code container too, just unused binaries there.
 RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt /app/

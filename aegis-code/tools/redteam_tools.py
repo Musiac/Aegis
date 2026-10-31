@@ -1,4 +1,4 @@
-"""Thin client in front of the `redteam` container (see ../../redteam/): a bearer-token API, --network none, which scans only a pre-mounted
+"""Thin client in front of the `aegis-libraries` container (see ../../aegis-libraries/): a bearer-token API, --network none, which scans only a pre-mounted
 READ-ONLY copy of source. The tool here only forwards a named target and the tool name; it cannot send a path, a command or anything else
 the server would act on. Aegis is a single-operator tool (no accounts), so unlike a larger multi-account assistant there is no owner/admin role check here --
 the only gate is whether the server is actually configured (a token present)."""
@@ -379,7 +379,7 @@ async def _call_zap_streaming(target_url: str, emit) -> dict:
 
 async def pentest_zap(args: dict, ctx: dict) -> str:
     """Spider + passive + active (attacking) OWASP ZAP scan against a target_url the operator names -- a target they've stood up themselves.
-    Naming a URL here at all is the operator's own explicit, scoped consent (see redteam/server.py's _zap_target_ok); the only thing refused
+    Naming a URL here at all is the operator's own explicit, scoped consent (see aegis-libraries/redteam_server.py's _zap_target_ok); the only thing refused
     regardless of intent is the cloud-metadata address."""
     why = _gate()
     if why:
@@ -488,7 +488,7 @@ async def check_scanner_versions(args: dict, ctx: dict) -> str:
 
 async def update_scanner_tools(args: dict, ctx: dict) -> str:
     """Actually upgrades the named tool(s), live, in the redteam container -- real pip installs / binary downloads
-    into its host-mounted /tool_updates (see redteam/server.py's own module comment for why that's safe without
+    into its host-mounted /tool_updates (see aegis-libraries/redteam_server.py's own module comment for why that's safe without
     touching its read-only root, AND why it's a real, permanent update, not a session-only one), never a claim
     without a real action behind it. Only ever called after the operator said yes to an update
     check_scanner_versions offered them."""
@@ -500,7 +500,7 @@ async def update_scanner_tools(args: dict, ctx: dict) -> str:
         return json.dumps({"ok": False, "error": "tools must be a non-empty list of real tool names from outdated_tools"})
 
     # /update_tools processes tools ONE AT A TIME, not concurrently -- this must stay comfortably above the sum of
-    # every tool's own worst-case time (redteam/server.py's own pip-install timeout is 240s per tool), or this
+    # every tool's own worst-case time (aegis-libraries/redteam_server.py's own pip-install timeout is 240s per tool), or this
     # outer call times out first and masks the real per-tool error/result that endpoint would otherwise return.
     async with httpx.AsyncClient(timeout=httpx.Timeout(60.0 + 240.0 * len(tools), connect=5.0)) as c:
         r = await c.post(f"{URL}/update_tools", json={"tools": tools}, headers={"Authorization": f"Bearer {TOKEN}"})

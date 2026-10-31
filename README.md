@@ -173,10 +173,10 @@ before running it. It ends by printing the two ways in to the chat loop:
 
 ```
 Web UI:  http://127.0.0.1:8900
-CLI:     docker run -it --rm --network host -v aegis-sock:/sock --env-file .env aegis-backend:latest
+CLI:     docker run -it --rm --network host -v aegis-sock:/sock --env-file .env aegis-code:latest
 ```
 
-The web UI (`aegis-backend-web`) runs as a daemon by default — open the URL and start typing. The
+The web UI (`aegis-code`) runs as a daemon by default — open the URL and start typing. The
 CLI is a separate, interactive container using the exact same backend image and the same running
 redteam/sandbox/pentestlive containers; run it any time instead of (or alongside) the web UI.
 
@@ -242,7 +242,7 @@ receives. Below are the guardrails and nudges Aegis has:
 
 ![Aegis architecture, high level: the operator talks to Aegis, which calls 1 active + 6 passive scan tools plus guardrails, runs commands in a locked-down sandbox, and can clone a repo, pentest it live, and write fixes back](docs/assets/aegis_architecture-highlevel.png)
 
-![Aegis architecture: browser → aegis-backend-web → aegis-redteam/pentestlive/sandbox-proxy, with the code-fix sandbox isolated behind --network none, Meta's Model API and GitHub as the only external services, and host-mounted volumes for scan targets and exported fixes](docs/assets/aegis_architecture-technical.png)
+![Aegis architecture: browser → aegis-code → aegis-libraries/sandbox-proxy, with the code-fix sandbox isolated behind --network none, Meta's Model API and GitHub as the only external services, and host-mounted volumes for scan targets and exported fixes](docs/assets/aegis_architecture-technical.png)
 
 Three small containers + a thin backend:
 
@@ -260,7 +260,7 @@ Three small containers + a thin backend:
   you name, via [ProjectDiscovery's httpx](https://github.com/projectdiscovery/httpx) (`pd-httpx`).
 - **backend/** — a thin chat loop that dispatches to the three containers above over a bearer-token HTTP
   API (redteam/pentestlive) or a Unix socket (sandbox). Its own 4th container, built once and run two
-  ways: `aegis-backend-web` as a daemon (`--network host`, serves the web UI on `:8900`, started by
+  ways: `aegis-code` as a daemon (`--network host`, serves the web UI on `:8900`, started by
   `install.sh`) and the CLI as a separate, interactive `docker run -it --rm ...` (see Install) using the
   same image. Both need `--network host` plus the same `aegis-sock` named volume the sandbox uses
   (AF_UNIX sockets can't bind inside a bind-mounted host dir on Docker Desktop/macOS, confirmed live,
@@ -316,7 +316,7 @@ Aegis works like a Hibachi Chef - cooks right on your table. As Aegis works dili
 ## Run log
 
 Every turn writes one-line events to the backend's stdout, so the efficiency of a run can be read without
-the page: `docker logs aegis-backend-web | grep cj-turn`. Events: `session_open` / `session_close`,
+the page: `docker logs aegis-code | grep cj-turn`. Events: `session_open` / `session_close`,
 `turn_start`, one `round` per model call (tokens, cost, seconds, which tools it asked for), one `tool` per
 tool call (scrubbed arguments, seconds, whether it was a repeat or failed, and metadata about the result such
 as `count`, `exit_code`, `active_scan_ran`), `count_check` for Word reports, and a `turn_end` summary (rounds,
@@ -366,7 +366,7 @@ These twelve are the questions shown in the UI. Edit the placeholders (`OWNER/RE
 - [x] `backend/`'s chat loop — dispatches a person's words to the right tool, picks the LLM provider from
   `.env`, loops tool calls to completion. Shared by the CLI (`python -m backend.cli`) and the web UI.
 - [x] The web UI (terminal + chat panes, model dropdown, running cost readout) — built, runs as the
-  `aegis-backend-web` daemon on `:8900`, started by `install.sh` by default.
+  `aegis-code` daemon on `:8900`, started by `install.sh` by default.
 - [x] A real, repeatable fix loop for a cloned external repo — 3 independent runs against
   [usestrix/strix](https://github.com/usestrix/strix), each from a fresh clone, each reaching 0 findings
   across all 5 static scanners in one pass; see [the verification

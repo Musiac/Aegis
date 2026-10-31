@@ -3,10 +3,10 @@ REAL web server of a cloned-and-fixed project, so an active ZAP pentest has some
 "start the cloned code's server in sandbox env ... and run a pentest on it" not actually possible before 2026-10-26.
 
 Runs as THIS container's own process 1 (see the docker run command in sandbox_web/README.md), on a fixed control port (default 7999) that only
-aegis-backend-web calls (backend/tools/sandbox_web.py). The controlled app is started as a tracked child process on APP_PORT (default
+aegis-code calls (backend/tools/sandbox_web.py). The controlled app is started as a tracked child process on APP_PORT (default
 8900, matching Aegis's own entrypoint.sh convention: `uvicorn backend.web:app --host 0.0.0.0 --port 8900`), inside this SAME container, on
 `aegis-net` -- so the redteam container (also on that network) can reach it by container/alias name, the same way it already reaches
-aegis-backend-web. One app runs at a time; starting a new one stops whatever was running first (mirrors a real "restart the server, re-scan"
+aegis-code. One app runs at a time; starting a new one stops whatever was running first (mirrors a real "restart the server, re-scan"
 cycle, not several apps side by side).
 
 Project source is read from the SAME host-mounted directories the sandbox's own bash_run/edit_file write into (/dynamic_target/<name>,

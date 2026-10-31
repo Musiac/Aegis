@@ -1,5 +1,7 @@
 #!/bin/bash
-# Aegis install: builds and starts the 3 containers (redteam, sandbox, pentestlive), same recipe as
+# Aegis install: builds and starts the containers -- aegis-code (the dynamic chat/backend logic),
+# aegis-libraries (the scanner/tool server -- redteam + pentestlive, folded into one image/container
+# 2026-10-31), aegis-sandbox + aegis-sandbox-proxy + aegis-sandbox-web (the sandbox trio) -- same recipe as
 # Strix's own "clone, install, run" shape -- review this script before running it, same as you would any
 # install script, including this one.
 #
@@ -8,9 +10,9 @@
 #                            and leave the two generated tokens below alone)
 #   bash install.sh
 #
-# What "one docker" means here: one command (this script / docker compose), not one container -- sandbox/
+# What "one docker" means here: one command (this script / docker compose), not one container -- aegis-sandbox
 # genuinely needs --network none as a real security boundary and cannot share a network namespace with
-# redteam/ or pentestlive/, which need real network access. See README.md's Architecture section.
+# aegis-libraries, which needs real network access. See README.md's Architecture section.
 set -e
 cd "$(dirname "$0")"
 ENV_FILE=".env"
@@ -23,7 +25,7 @@ mkdir -p src/self self_target aegis_out dynamic_pristine dynamic_target redteam_
 # scans read-only (at /src_self/self) -- so a fix written in the sandbox is exactly what the next re-scan sees.
 # dynamic_pristine/ and dynamic_target/ are the same two dirs for a cloned repo (redteam_clone_repo): redteam
 # writes a fresh clone into dynamic_pristine/<name>, the sandbox copies it from there into dynamic_target/<name>,
-# and redteam then scans that SAME dir read-only at /src_dynamic/<name> -- see redteam/server.py's own docstring.
+# and redteam then scans that SAME dir read-only at /src_dynamic/<name> -- see aegis-libraries/redteam_server.py's own docstring.
 # .env is excluded: it holds the LLM keys and tool tokens, and the sandbox (which can read and export this copy)
 # must never see a secret.
 rsync -a --delete --exclude ".git" --exclude ".env" --exclude "__pycache__" --exclude "src" --exclude "self_target" --exclude "aegis_out" --exclude "dynamic_pristine" --exclude "dynamic_target" ./ src/self/
@@ -34,8 +36,8 @@ rsync -a --delete --exclude ".git" --exclude ".env" --exclude "__pycache__" --ex
 # from the sandbox image (no sudo needed) seeds the self working copy from the pristine copy and hands each dir to
 # the one container that writes it: self_target/, dynamic_target/ and aegis_out/ to the sandbox (1001),
 # dynamic_pristine/ and redteam_tool_updates/ to redteam (1000 -- it writes fresh clones AND live scanner-tool
-# updates there, see redteam/server.py's own "Live, same-session tool update" section). Every other mount of
-# these dirs is read-only. It runs BEFORE redteam starts: redteam/server.py only registers "self" if
+# updates there, see aegis-libraries/redteam_server.py's own "Live, same-session tool update" section). Every other mount of
+# these dirs is read-only. It runs BEFORE redteam starts: aegis-libraries/redteam_server.py only registers "self" if
 # /src_self/self already exists then.
 docker build -q -t aegis-sandbox:latest ./sandbox | tail -1
 docker run --rm --user 0 --network none --entrypoint sh \
@@ -45,35 +47,37 @@ docker run --rm --user 0 --network none --entrypoint sh \
   aegis-sandbox:latest -c 'rm -rf /self_target/self && cp -a /self_pristine /self_target/self &&
     chown -R 1001:1001 /self_target /dynamic_target /aegis_out && chown -R 1000:1000 /dynamic_pristine /redteam_tool_updates'
 
-# --- redteam: static scanners + ZAP. On Linux this ran as --network host; Docker Desktop (Mac/Windows) does not
-# route --network host to localhost reliably (confirmed live), so this uses a dedicated bridge network
-# (aegis-net) instead, with the other containers reached by container name, not 127.0.0.1 -- see
-# AEGIS_REDTEAM_URL/AEGIS_PENTESTLIVE_URL below.
+# --- aegis-libraries: static scanners + ZAP + pentestlive, folded into one image/container (2026-10-31).
+# On Linux this ran as --network host; Docker Desktop (Mac/Windows) does not route --network host to
+# localhost reliably (confirmed live), so this uses a dedicated bridge network (aegis-net) instead, with
+# the other containers reached by container name, not 127.0.0.1 -- see AEGIS_REDTEAM_URL/AEGIS_PENTESTLIVE_URL
+# below (both now point at the SAME container, aegis-libraries, on its 2 ports).
 docker network inspect aegis-net >/dev/null 2>&1 || docker network create aegis-net >/dev/null
-docker build -q -t aegis-redteam:latest ./redteam | tail -1
+docker build -q -t aegis-libraries:latest ./aegis-libraries | tail -1
 
-# Build the other 2 images now (normally built further below, sandbox is already built above) so
+# Build the other image now (normally built further below, sandbox is already built above) so
 # redteam_trivy has something real to scan -- a plain `docker save` tarball of each of Aegis's own
-# 4 images, mounted read-only at /images/<name>.tar. This never touches the Docker socket or a registry:
+# images, mounted read-only at /images/<name>.tar. This never touches the Docker socket or a registry:
 # a deploy-time snapshot, same as the full-featured version's Trivy design.
-docker build -q -t aegis-pentestlive:latest ./pentestlive | tail -1
-docker build -q -t aegis-backend:latest ./backend | tail -1
+docker build -q -t aegis-code:latest ./aegis-code | tail -1
 mkdir -p images
-docker save aegis-redteam:latest -o images/redteam.tar
+docker save aegis-libraries:latest -o images/libraries.tar
 docker save aegis-sandbox:latest -o images/sandbox.tar
-docker save aegis-pentestlive:latest -o images/pentestlive.tar
-docker save aegis-backend:latest -o images/backend.tar
+docker save aegis-code:latest -o images/code.tar
 
 grep -q '^REDTEAM_TOKEN=' "$ENV_FILE" || echo "REDTEAM_TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" >> "$ENV_FILE"
 REDTEAM_TOKEN=$(grep '^REDTEAM_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
 GITHUB_CLONE_TOKEN=$(grep '^GITHUB_CLONE_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
-docker rm -f aegis-redteam >/dev/null 2>&1 || true
-docker volume create aegis-redteam-trivy-cache >/dev/null
-docker run -d --name aegis-redteam --network aegis-net --read-only --tmpfs /tmp:size=2g,exec --restart unless-stopped \
+grep -q '^PENTESTLIVE_TOKEN=' "$ENV_FILE" || echo "PENTESTLIVE_TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" >> "$ENV_FILE"
+PENTESTLIVE_TOKEN=$(grep '^PENTESTLIVE_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
+docker rm -f aegis-libraries >/dev/null 2>&1 || true
+docker volume create aegis-libraries-trivy-cache >/dev/null
+docker run -d --name aegis-libraries --network aegis-net --read-only --tmpfs /tmp:size=2g,exec --restart unless-stopped \
   -v "$(pwd)/self_target:/src_self:ro" -v "$(pwd)/dynamic_pristine:/dynamic_pristine_rw" -v "$(pwd)/dynamic_target:/src_dynamic:ro" \
-  -v "$(pwd)/images:/images:ro" -v aegis-redteam-trivy-cache:/trivy-cache \
+  -v "$(pwd)/images:/images:ro" -v aegis-libraries-trivy-cache:/trivy-cache \
   -v "$(pwd)/redteam_tool_updates:/tool_updates" \
-  -e REDTEAM_TOKEN="$REDTEAM_TOKEN" -e GITHUB_CLONE_TOKEN="$GITHUB_CLONE_TOKEN" aegis-redteam:latest >/dev/null
+  -e REDTEAM_TOKEN="$REDTEAM_TOKEN" -e GITHUB_CLONE_TOKEN="$GITHUB_CLONE_TOKEN" -e PENTESTLIVE_TOKEN="$PENTESTLIVE_TOKEN" \
+  -p 127.0.0.1:7907:7907 aegis-libraries:latest >/dev/null
 
 # --- sandbox: the isolated code sandbox fixredteam/fixpentest write real fixes in (--network none) ---
 # aegis-sock is a Docker-managed NAMED VOLUME, not a host bind mount -- AF_UNIX sockets cannot be
@@ -95,13 +99,6 @@ docker run -d --name aegis-sandbox --restart unless-stopped --init --network non
   -v "$(pwd)/src/self:/self_pristine:ro" -v "$(pwd)/self_target:/self_target" \
   -v "$(pwd)/dynamic_pristine:/dynamic_pristine:ro" -v "$(pwd)/dynamic_target:/dynamic_target" aegis-sandbox:latest sandbox >/dev/null
 
-# --- pentestlive: the one active, consent-gated probe (pd-httpx) --- (image already built above, for Trivy)
-grep -q '^PENTESTLIVE_TOKEN=' "$ENV_FILE" || echo "PENTESTLIVE_TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" >> "$ENV_FILE"
-PENTESTLIVE_TOKEN=$(grep '^PENTESTLIVE_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
-docker rm -f aegis-pentestlive >/dev/null 2>&1 || true
-docker run -d --name aegis-pentestlive --network aegis-net -p 127.0.0.1:7907:7907 --read-only --tmpfs /tmp:size=256m --restart unless-stopped \
-  -e PENTESTLIVE_TOKEN="$PENTESTLIVE_TOKEN" aegis-pentestlive:latest >/dev/null
-
 # NOTE on kokoro/: a local Kokoro-82M TTS container (kokoro/Dockerfile, backend's /api/tts_kokoro) was built
 # 2026-10-29, then NOT wired in here the same day -- Meta's hackathon organizers ruled it out ("Every model
 # your project calls at runtime must be a Meta model... a built-in system or browser voice that isn't an AI
@@ -109,17 +106,17 @@ docker run -d --name aegis-pentestlive --network aegis-net -p 127.0.0.1:7907:790
 # builds or starts aegis-kokoro-tts, and the frontend never calls /api/tts_kokoro. See README's "Meta models
 # vs. OS/browser features" section.
 
-# --- backend: image already built above, for Trivy. The web UI runs as a real daemon (:8900); the CLI stays interactive. ---
-# AEGIS_REDTEAM_URL/AEGIS_PENTESTLIVE_URL point at the other containers by NAME (aegis-net's own DNS), not
+# --- aegis-code: image already built above, for Trivy. The web UI runs as a real daemon (:8900); the CLI stays interactive. ---
+# AEGIS_REDTEAM_URL/AEGIS_PENTESTLIVE_URL point at the SAME container (aegis-net's own DNS), not
 # 127.0.0.1 -- each container has its own network namespace on a bridge network, unlike --network host.
-docker rm -f aegis-backend-web >/dev/null 2>&1 || true
-docker run -d --name aegis-backend-web --network aegis-net -p 8900:8900 -v aegis-sock:/sock --env-file .env --restart unless-stopped \
-  -e AEGIS_REDTEAM_URL="http://aegis-redteam:7906" -e AEGIS_PENTESTLIVE_URL="http://aegis-pentestlive:7907" \
-  aegis-backend:latest web >/dev/null
+docker rm -f aegis-code >/dev/null 2>&1 || true
+docker run -d --name aegis-code --network aegis-net -p 8900:8900 -v aegis-sock:/sock --env-file .env --restart unless-stopped \
+  -e AEGIS_REDTEAM_URL="http://aegis-libraries:7906" -e AEGIS_PENTESTLIVE_URL="http://aegis-libraries:7907" \
+  aegis-code:latest web >/dev/null
 
 # sandbox-web: hosts a cloned project's own server as www.sandbox.com:8900 for active pentest, plus the local
-# OpenAI stub on :8901 (added 2026-10-30). Reuses the aegis-backend image (needs its nodejs/npm for npm installs) --
-# a plain `docker restart` after only rebuilding THIS image does NOT pick up new binaries baked into aegis-backend;
+# OpenAI stub on :8901 (added 2026-10-30). Reuses the aegis-code image (needs its nodejs/npm for npm installs) --
+# a plain `docker restart` after only rebuilding THIS image does NOT pick up new binaries baked into aegis-code;
 # recreate it (this command) instead. control.py is bind-mounted read-only so editing it alone is picked up by a
 # restart. This container was run by hand for a while without ever being added here -- added now so a fresh
 # `install.sh` run (or a future "did a restart really pick this up" doubt) has one canonical source, same as
@@ -130,14 +127,14 @@ docker run -d --name aegis-sandbox-web --network aegis-net --network-alias www.s
   -v "$(pwd)/sandbox_web/control.py:/control/control.py:ro" \
   -v "$(pwd)/dynamic_target:/dynamic_target:ro" -v "$(pwd)/self_target:/self_target:ro" \
   -v "$(pwd)/sandbox_web/pip_cache:/pip_cache" -v "$(pwd)/sandbox_web/npm_cache:/npm_cache" \
-  --entrypoint python3 aegis-backend:latest -u /control/control.py >/dev/null
+  --entrypoint python3 aegis-code:latest -u /control/control.py >/dev/null
 
 sleep 3
-echo "--- redteam ---";      docker exec aegis-redteam curl -s http://127.0.0.1:7906/health; echo
-echo "--- pentestlive ---";  curl -s http://127.0.0.1:7907/health; echo
-echo "--- backend web ---";  curl -s http://127.0.0.1:8900/api/providers; echo
+echo "--- aegis-libraries (redteam) ---";   docker exec aegis-libraries curl -s http://127.0.0.1:7906/health; echo
+echo "--- aegis-libraries (pentestlive) ---"; curl -s http://127.0.0.1:7907/health; echo
+echo "--- aegis-code web ---";  curl -s http://127.0.0.1:8900/api/providers; echo
 docker ps --format '{{.Names}}\t{{.Status}}' | grep aegis
 echo
 echo "All set."
 echo "Web UI:  http://127.0.0.1:8900"
-echo "CLI:     docker run -it --rm --network aegis-net -v aegis-sock:/sock --env-file .env aegis-backend:latest"
+echo "CLI:     docker run -it --rm --network aegis-net -v aegis-sock:/sock --env-file .env aegis-code:latest"

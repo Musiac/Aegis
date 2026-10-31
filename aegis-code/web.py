@@ -554,7 +554,7 @@ async def ws_endpoint(ws: WebSocket):
     # Deterministic, code-driven, runs every single new connection -- not an LLM tool call, so it can never be skipped, forgotten or
     # argued out of by the model the way a prompt-instructed step can be. Nothing in /dynamic_pristine_rw, /dynamic_target or /REPL/work
     # is ever reused across a browser session (new_session() above starts fresh every reconnect), so this always deletes genuine
-    # orphans, never anything the operator is mid-task on. See sandbox/exec_server.py's do_cleanup and redteam/server.py's
+    # orphans, never anything the operator is mid-task on. See sandbox/exec_server.py's do_cleanup and aegis-libraries/redteam_server.py's
     # /cleanup_targets for what each actually removes.
     try:
         sandbox_result = await cleanup_sandbox_scratch({}, ctx)

@@ -1,4 +1,4 @@
-"""Structured one-line-per-event log of what Aegis actually did in a turn, written to stdout so `docker logs aegis-backend-web`
+"""Structured one-line-per-event log of what Aegis actually did in a turn, written to stdout so `docker logs aegis-code`
 shows it. The point is to judge a run's efficiency from the server side alone: how many model rounds, which tools in what order, how long
 each took, what each cost, which calls were repeats, which failed.
 
