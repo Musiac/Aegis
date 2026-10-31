@@ -122,17 +122,43 @@ async def verify_sandbox_safety(args: dict, ctx: dict) -> str:
     })
 
 
+def format_gate_lines(results: list) -> list:
+    """Plain-English, code-computed (never model-guessed) one-liner per check -- the exact same judgment
+    _evaluate() makes, in the same shape the old automatic-greeting narration used to show (removed from the
+    greeting 2026-10-31, moved here instead, see run_safety_gate()). Shared formatter so the chat-facing note
+    and anything else that reports this can never drift from the real pass/fail logic."""
+    by_check = {r["check"]: (r.get("raw") or {}) for r in results}
+    lines = []
+    w = by_check.get("write_outside_sandbox", {})
+    w_out = (w.get("stdout") or "") + (w.get("stderr") or "")
+    lines.append("Can't write outside the sandbox (blocked: read-only)" if w_out.count("Read-only file system") >= 2
+                 else f"Write-outside-sandbox check: unexpected output ({w_out[:120]!r})")
+    n = by_check.get("external_network", {})
+    n_out = n.get("stdout") or ""
+    m = re.search(r"exit_code=(\d+)", n_out)
+    lines.append("Can't reach the internet (blocked: no network device)" if m and m.group(1) != "0"
+                 else f"External-network check: unexpected output ({n_out[:120]!r})")
+    c = by_check.get("resource_caps", {})
+    c_out = c.get("stdout") or ""
+    caps = ", ".join(re.findall(r"(memory\.max=\S+|pids\.max=\S+|cpu\.max=\S+)", c_out)) or "unavailable"
+    lines.append(f"Resource limits enforced: {caps}")
+    return lines
+
+
 def run_safety_gate() -> tuple:
-    """The hard gate: runs the exact same 3 checks, no narration, right after sandbox_tools._call lazy-starts a fresh
-    trio and before the operator's actual task proceeds in it (owner's own instruction, 2026-10-31: the safety check
-    must happen after the sandbox trio is created, and only on success does real work start inside it). Deliberately
+    """The hard gate: runs the exact same 3 checks, right after sandbox_tools._call lazy-starts a fresh trio and
+    before the operator's actual task proceeds in it (owner's own instruction, 2026-10-31: the safety check must
+    happen after the sandbox trio is created, and only on success does real work start inside it). Deliberately
     plain sync (not async like _run_checks/verify_sandbox_safety above): _call's lazy-start path is itself sync and
     already runs inside an active event loop (called from async tool functions without await, same as every other
     _call use), so an async gate here would need asyncio.run() from inside a running loop -- a guaranteed
-    RuntimeError. Returns (passed, reasons_text)."""
+    RuntimeError. Returns (passed, reasons_text, lines) -- lines is format_gate_lines(results), for the caller to
+    fold into whatever tool result triggered the lazy-start, so the model reports it in its own next chat reply
+    (added 2026-10-31: running this silently meant the operator never saw it confirmed in chat at all, even
+    though it demonstrably ran and passed)."""
     results = []
     for c in CHECKS:
         raw = _call("POST", "/run", {"kind": "bash", "code": c["cmd"], "name": "", "timeout": 10}, timeout=20)
         results.append({"check": c["key"], "cmd": c["cmd"], "raw": raw})
     passed, reasons = _evaluate(results)
-    return passed, "; ".join(reasons)
+    return passed, "; ".join(reasons), format_gate_lines(results)

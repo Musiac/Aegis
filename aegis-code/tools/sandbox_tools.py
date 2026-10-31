@@ -73,16 +73,29 @@ def _lazy_start_and_retry(method: str, path: str, body: dict, timeout: float) ->
     from .sandbox_verify import run_safety_gate   # deferred: sandbox_verify imports _call from this module at
                                                     # its own top level, so importing it back at THIS module's
                                                     # top level would be circular.
-    passed, reasons = run_safety_gate()
+    passed, reasons, lines = run_safety_gate()
     if not passed:
         trio_client.stop_trio()
         return {"error": f"The code sandbox failed its own safety check after starting, so no work ran in it: {reasons}"}
     try:
         result = _raw_call(method, path, body, timeout)
         trio_client.touch()
-        return result
     except Exception as e:                                                         # noqa: BLE001
         return {"error": f"The code sandbox did not answer after starting ({type(e).__name__})."}
+    # Folded into whatever tool result triggered the lazy-start (not pushed as chat text directly -- this
+    # module has no ctx/on_text, by design) so the model reports it in its own very next reply, same "note"
+    # pattern every other code-computed fact in this codebase uses. Owner's own correction, 2026-10-31: running
+    # the gate silently meant it was never actually confirmed to the operator in chat, even though it ran and
+    # passed -- "even if aegis might have done these checks internally, it did not report to me in chat."
+    if isinstance(result, dict):
+        result["_sandbox_just_verified"] = {
+            "passed": True, "checks": lines,
+            "note": "The sandbox was just created fresh for this task and its 3 isolation checks were just run and passed for "
+                    "real, right now -- report this plainly in THIS reply, briefly, before the rest of what you're about to say: "
+                    "name the 3 checks in `_sandbox_just_verified.checks` exactly as given. This is a one-time confirmation for "
+                    "this task's own freshly-created sandbox, not something to repeat on every later call in the same task."
+        }
+    return result
 
 
 async def repl_run(args: dict, ctx: dict) -> str:

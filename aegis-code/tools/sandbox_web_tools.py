@@ -38,16 +38,26 @@ async def _call(path: str, body: dict = None) -> dict:
         # Same hard gate as sandbox_tools.py's lazy-start path (owner's own instruction, 2026-10-31): the safety
         # check runs right after the trio is created, and only on success does the operator's actual call proceed.
         from .sandbox_verify import run_safety_gate
-        passed, reasons = run_safety_gate()
+        passed, reasons, lines = run_safety_gate()
         if not passed:
             trio_client.stop_trio()
             return {"ok": False, "error": f"The code sandbox failed its own safety check after starting, so no work ran in it: {reasons}"}
         try:
             result = await _raw_call(path, body)
             trio_client.touch()
-            return result
         except httpx.HTTPError as e:
             return {"ok": False, "error": f"could not reach the sandbox-web control plane after starting it ({type(e).__name__})."}
+        # Same chat-narration fold-in as sandbox_tools.py's lazy-start path (owner's own correction, 2026-10-31):
+        # a silently-passed gate was never actually confirmed to the operator in chat.
+        if isinstance(result, dict):
+            result["_sandbox_just_verified"] = {
+                "passed": True, "checks": lines,
+                "note": "The sandbox was just created fresh for this task and its 3 isolation checks were just run and passed "
+                        "for real, right now -- report this plainly in THIS reply, briefly, before the rest of what you're about "
+                        "to say: name the 3 checks in `_sandbox_just_verified.checks` exactly as given. One-time confirmation for "
+                        "this task's own freshly-created sandbox, not something to repeat on every later call in the same task."
+            }
+        return result
 
 
 def _note(d: dict, verb: str) -> dict:
