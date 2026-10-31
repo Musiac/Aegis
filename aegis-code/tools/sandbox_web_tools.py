@@ -5,6 +5,7 @@ why "start the cloned code's server and pentest it" was not actually possible be
 Talks over plain HTTP to aegis-sandbox-web's control plane (sandbox_web/control.py), reachable on aegis-net by container name. That
 container also answers to the alias www.sandbox.com on port 8900 -- the address pentest_zap's target_url should name once the app is running.
 """
+import asyncio
 import json
 
 import httpx
@@ -24,27 +25,38 @@ async def _raw_call(path: str, body: dict = None) -> dict:
     return r.json()
 
 
+def _start_trio_and_gate_sync() -> dict:
+    """The blocking half (trio_client.start_trio/stop_trio -- plain http.client sync calls -- plus
+    run_safety_gate's own sync socket round trips) of the lazy-start path, run via asyncio.to_thread so it
+    never blocks THIS process's single event loop (2026-10-31, same real regression as sandbox_tools.py's
+    _call: a bare blocking call here stalls the websocket's own receive loop too, including a "stop"/"pause"
+    sent while this runs)."""
+    started = trio_client.start_trio()
+    if not started.get("ok"):
+        return {"ok": False, "error": f"Could not start the code sandbox: {started.get('error', 'unknown error')}"}
+    from .sandbox_verify import run_safety_gate   # deferred, same circular-import reason as sandbox_tools.py
+    passed, reasons, lines = run_safety_gate()
+    if not passed:
+        trio_client.stop_trio()
+        return {"ok": False, "error": f"The code sandbox failed its own safety check after starting, so no work ran in it: {reasons}"}
+    return {"ok": True, "lines": lines}
+
+
 async def _call(path: str, body: dict = None) -> dict:
     try:
         result = await _raw_call(path, body)
-        trio_client.touch()
+        await asyncio.to_thread(trio_client.touch)
         return result
     except httpx.HTTPError:
         # Same ephemeral-trio lazy-start as sandbox_tools.py's _call: aegis-sandbox-web not answering is the
         # normal state between tasks, not an error -- start the trio and retry exactly once.
-        started = trio_client.start_trio()
-        if not started.get("ok"):
-            return {"ok": False, "error": f"Could not start the code sandbox: {started.get('error', 'unknown error')}"}
-        # Same hard gate as sandbox_tools.py's lazy-start path (owner's own instruction, 2026-10-31): the safety
-        # check runs right after the trio is created, and only on success does the operator's actual call proceed.
-        from .sandbox_verify import run_safety_gate
-        passed, reasons, lines = run_safety_gate()
-        if not passed:
-            trio_client.stop_trio()
-            return {"ok": False, "error": f"The code sandbox failed its own safety check after starting, so no work ran in it: {reasons}"}
+        gate_result = await asyncio.to_thread(_start_trio_and_gate_sync)
+        if not gate_result.get("ok"):
+            return gate_result
+        lines = gate_result["lines"]
         try:
             result = await _raw_call(path, body)
-            trio_client.touch()
+            await asyncio.to_thread(trio_client.touch)
         except httpx.HTTPError as e:
             return {"ok": False, "error": f"could not reach the sandbox-web control plane after starting it ({type(e).__name__})."}
         # Same chat-narration fold-in as sandbox_tools.py's lazy-start path (owner's own correction, 2026-10-31):

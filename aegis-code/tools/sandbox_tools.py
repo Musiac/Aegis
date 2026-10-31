@@ -5,6 +5,7 @@ non-root, no secrets mounted. This talks to it over a Unix socket in a shared vo
 Deliberately simpler than the full-featured version's version: no MCP server layer (fastmcp is not a dependency at all here -- this calls the socket
 directly), and no platform-tools callback bridge (the sandbox has no need to call back into Aegis itself; fixing a real repo's source
 needs file read/write and shell commands, not web_search from inside the sandbox). export_project writes into /aegis_out on the host."""
+import asyncio
 import base64
 import http.client
 import json
@@ -38,11 +39,23 @@ def _raw_call(method: str, path: str, body: dict, timeout: float):
     return data
 
 
-_lazy_start_depth = 0   # re-entrancy guard: run_safety_gate() below calls back into _call(), which must never
-                        # itself attempt a SECOND lazy-start while the first one is still being verified.
+_lazy_start_depth = 0   # re-entrancy guard: run_safety_gate() below calls back into _call_sync(), which must
+                        # never itself attempt a SECOND lazy-start while the first one is still being verified.
 
 
-def _call(method: str, path: str, body: dict = None, timeout: float = 60.0) -> dict:
+async def _call(method: str, path: str, body: dict = None, timeout: float = 60.0) -> dict:
+    """Async-facing wrapper every tool function below calls with `await`. Dispatches the real (sync, blocking)
+    work to a worker thread (2026-10-31, real regression found live: _call_sync's blocking socket I/O, now
+    potentially stretched by a lazy-start + 3-check safety gate on a fresh trio, was running directly inside an
+    asyncio.create_task on the single event loop with no await point at all -- which stalls EVERYTHING else on
+    that loop, including the websocket's own receive loop reading a "stop"/"pause" message sent mid-task. The
+    operator's own catch: "the Send button... should be enabled... that was not available." asyncio.to_thread
+    keeps the event loop free for the whole duration, so a stop/pause sent while this runs is read immediately,
+    not queued behind it."""
+    return await asyncio.to_thread(_call_sync, method, path, body, timeout)
+
+
+def _call_sync(method: str, path: str, body: dict = None, timeout: float = 60.0) -> dict:
     global _lazy_start_depth
     try:
         result = _raw_call(method, path, body, timeout)
@@ -101,7 +114,7 @@ def _lazy_start_and_retry(method: str, path: str, body: dict, timeout: float) ->
 async def repl_run(args: dict, ctx: dict) -> str:
     """Runs Python 3.12 in the isolated sandbox and returns what it printed. See bash_run for the shell equivalent."""
     code, name, timeout = str(args.get("code") or ""), str(args.get("name") or ""), max(1, min(int(args.get("timeout") or 20), 45))
-    return json.dumps(_call("POST", "/run", {"kind": "python", "code": code, "name": name, "timeout": timeout}, timeout=timeout + 15))
+    return json.dumps(await _call("POST", "/run", {"kind": "python", "code": code, "name": name, "timeout": timeout}, timeout=timeout + 15))
 
 
 async def bash_run(args: dict, ctx: dict) -> str:
@@ -109,7 +122,7 @@ async def bash_run(args: dict, ctx: dict) -> str:
     shell variables carry over between calls, like a real terminal. This is the tool fixredteam/fixpentest use to read and edit a target's
     working copy (/self_target/self for "self", /dynamic_target/<name> for a cloned repo) -- the same directory redteam re-scans."""
     command, timeout = str(args.get("command") or ""), max(1, min(int(args.get("timeout") or 20), 45))
-    return json.dumps(_call("POST", "/run", {"kind": "bash", "code": command, "name": "", "timeout": timeout}, timeout=timeout + 15))
+    return json.dumps(await _call("POST", "/run", {"kind": "bash", "code": command, "name": "", "timeout": timeout}, timeout=timeout + 15))
 
 
 async def cleanup_sandbox_scratch(args: dict, ctx: dict) -> str:
@@ -117,7 +130,7 @@ async def cleanup_sandbox_scratch(args: dict, ctx: dict) -> str:
     browser session), and /aegis_out beyond the newest 20 exports. Called deterministically in code at the start of every new session (see
     web.py), not something the model needs to call itself -- exposed here mainly so core.py's startup path and a manual re-run share one
     implementation. Exempt from the /REPL size cap: this is the one operation that must still work once /REPL is already full."""
-    return json.dumps(_call("POST", "/cleanup", {}, timeout=30.0))
+    return json.dumps(await _call("POST", "/cleanup", {}, timeout=30.0))
 
 
 # Runs INSIDE the sandbox (python kind): builds CHANGES.txt as a REAL before/after diff (pristine copy vs the fixed working copy) and puts it into the zip.
@@ -180,12 +193,12 @@ print('CHANGES_OK files=%d plus=%d minus=%d zip_rc=%d %s' % (len(rows) + len(bin
 """
 
 
-def _real_changes(project: str, zip_path: str) -> str:
+async def _real_changes(project: str, zip_path: str) -> str:
     """Rewrites CHANGES.txt inside the already-made zip with the real diff. Returns the script's one-line result ('' if it could not run)."""
     pristine = "/self_pristine" if project == "self" else f"/dynamic_pristine/{project}"
     work = f"/REPL/work/{project}"
     code = f"import sys\nsys.argv = ['changes', {pristine!r}, {work!r}, {zip_path!r}, {project!r}]\n" + _CHANGES_SCRIPT
-    out = _call("POST", "/run", {"kind": "python", "code": code, "name": "", "timeout": 40}, timeout=55)
+    out = await _call("POST", "/run", {"kind": "python", "code": code, "name": "", "timeout": 40}, timeout=55)
     text = str(out.get("stdout") or "")
     return text.strip() if "CHANGES_OK" in text else ""
 
@@ -198,11 +211,11 @@ async def export_project(args: dict, ctx: dict) -> str:
         # The fixed working copy is copied into /REPL/work by code (a fixed command that only differs by name): leaving it to the model cost a whole
         # round (33 s in a real run) right before every export. A name that is not a working copy (already placed in /REPL/work by hand) is left as it is.
         src = "/self_target/self" if project == "self" else f"/dynamic_target/{project}"
-        _call("POST", "/run", {"kind": "bash", "name": "", "timeout": 30,
+        await _call("POST", "/run", {"kind": "bash", "name": "", "timeout": 30,
                                "code": f"if [ -d {src} ]; then mkdir -p /REPL/work && rm -rf /REPL/work/{project} && cp -r {src} /REPL/work/{project}; fi"}, timeout=45)
-    result = _call("POST", "/export", {"project": project}, timeout=35.0)
+    result = await _call("POST", "/export", {"project": project}, timeout=35.0)
     if result.get("ok") and result.get("path") and re.fullmatch(r"[A-Za-z0-9._-]{1,100}", project):
-        line = _real_changes(project, str(result["path"]))
+        line = await _real_changes(project, str(result["path"]))
         if line:
             result["changes_file"] = "CHANGES.txt"
             result["note"] = f"Created {result.get('filename')} containing CHANGES.txt: a real unified diff of every changed file against the untouched clone ({line.replace('CHANGES_OK ', '')})."
@@ -240,7 +253,7 @@ async def append_doc_to_export(zip_path: str, doc_filename: str, data_base64: st
         f"    z.writestr({safe_name!r}, data)\n"
         "print('APPEND_OK')\n"
     )
-    out = _call("POST", "/run", {"kind": "python", "code": code, "name": "", "timeout": 20}, timeout=35)
+    out = await _call("POST", "/run", {"kind": "python", "code": code, "name": "", "timeout": 20}, timeout=35)
     if "APPEND_OK" in json.dumps(out):
         return {"ok": True, "zip_path": zip_path, "doc_filename": safe_name}
     return {"ok": False, "error": str(out)[:300]}
@@ -248,7 +261,7 @@ async def append_doc_to_export(zip_path: str, doc_filename: str, data_base64: st
 
 async def repl_list(args: dict, ctx: dict) -> str:
     """Lists the scripts already saved in /REPL. Check this before writing new code."""
-    return json.dumps(_call("GET", "/list", timeout=15))
+    return json.dumps(await _call("GET", "/list", timeout=15))
 
 
 async def check_sandbox_capacity(args: dict, ctx: dict) -> str:
@@ -257,7 +270,7 @@ async def check_sandbox_capacity(args: dict, ctx: dict) -> str:
     BEFORE cloning any repo whose size you are not confident fits -- compare the repo's size (from redteam_check_repo_size) against
     repl_cap_mb - repl_used_scratch_mb. If the repo would not fit, tell the user the exact numbers and ask whether to raise the quota (via
     increase_sandbox_capacity) before cloning; never raise it yourself without the user saying yes."""
-    return json.dumps(_call("GET", "/health", timeout=15))
+    return json.dumps(await _call("GET", "/health", timeout=15))
 
 
 async def increase_sandbox_capacity(args: dict, ctx: dict) -> str:
@@ -271,13 +284,13 @@ async def increase_sandbox_capacity(args: dict, ctx: dict) -> str:
         return json.dumps({"ok": False, "error": "mb must be an integer number of megabytes"})
     if mb <= 0:
         return json.dumps({"ok": False, "error": "mb must be a positive integer"})
-    return json.dumps(_call("POST", "/set_cap", {"mb": mb}, timeout=15))
+    return json.dumps(await _call("POST", "/set_cap", {"mb": mb}, timeout=15))
 
 
 _EDIT_ROOTS = ("/dynamic_target/", "/self_target/", "/REPL/work/")
 
 
-def _edit_one(path: str, old: str, new: str, every: bool) -> dict:
+async def _edit_one(path: str, old: str, new: str, every: bool) -> dict:
     if not path.startswith(_EDIT_ROOTS) or ".." in path.split("/"):
         return {"ok": False, "path": path, "error": f"edit_file only works inside a working copy ({', '.join(_EDIT_ROOTS)}...): {path!r} is not."}
     if not old:
@@ -299,7 +312,7 @@ def _edit_one(path: str, old: str, new: str, every: bool) -> dict:
         "line = text.count(chr(10), 0, i) + 1\n"
         "print('EDIT_OK replaced', n if every else 1, 'occurrence(s) in', p, 'starting at line', line)\n"
     )
-    out = _call("POST", "/run", {"kind": "python", "code": code, "name": "", "timeout": 20}, timeout=35)
+    out = await _call("POST", "/run", {"kind": "python", "code": code, "name": "", "timeout": 20}, timeout=35)
     if "EDIT_OK" in json.dumps(out):
         return {"ok": True, "path": path, "result": str(out.get("stdout") or out.get("output") or "").strip() or "edit applied"}
     return {"ok": False, "path": path, "error": next((str(v).strip() for v in out.values() if "EDIT_ERROR" in str(v)), None) or str(out)[:300]}
@@ -328,7 +341,7 @@ async def edit_file(args: dict, ctx: dict) -> str:
         old_t = e.get("old_text") if e.get("old_text") is not None else args.get("old_text")
         new = e.get("new_text") if e.get("new_text") is not None else args.get("new_text")
         replace_all = e.get("replace_all") if e.get("replace_all") is not None else args.get("replace_all")
-        r = _edit_one(str(path or ""), str(old_t or ""), str(new) if new is not None else "", bool(replace_all))
+        r = await _edit_one(str(path or ""), str(old_t or ""), str(new) if new is not None else "", bool(replace_all))
         r["n"] = i
         results.append(r)
     if len(results) == 1 and "edits" not in args:

@@ -16,7 +16,7 @@ Three checks, each run for real and reported exactly as it comes back:
 import json
 import re
 
-from .sandbox_tools import _call
+from .sandbox_tools import _call, _call_sync
 
 CHECKS = [
     {
@@ -90,7 +90,7 @@ async def _run_checks(ctx: dict = None) -> list:
             await emit_status(c["simple"])
         if emit:
             await emit("verify_sandbox_safety", c["progress"])
-        raw = _call("POST", "/run", {"kind": "bash", "code": c["cmd"], "name": "", "timeout": 10}, timeout=20)
+        raw = await _call("POST", "/run", {"kind": "bash", "code": c["cmd"], "name": "", "timeout": 10}, timeout=20)
         results.append({"check": c["key"], "cmd": c["cmd"], "raw": raw})
     if emit_status:
         await emit_status("")   # clears the transient line once all 3 checks are done
@@ -146,19 +146,19 @@ def format_gate_lines(results: list) -> list:
 
 
 def run_safety_gate() -> tuple:
-    """The hard gate: runs the exact same 3 checks, right after sandbox_tools._call lazy-starts a fresh trio and
-    before the operator's actual task proceeds in it (owner's own instruction, 2026-10-31: the safety check must
-    happen after the sandbox trio is created, and only on success does real work start inside it). Deliberately
-    plain sync (not async like _run_checks/verify_sandbox_safety above): _call's lazy-start path is itself sync and
-    already runs inside an active event loop (called from async tool functions without await, same as every other
-    _call use), so an async gate here would need asyncio.run() from inside a running loop -- a guaranteed
-    RuntimeError. Returns (passed, reasons_text, lines) -- lines is format_gate_lines(results), for the caller to
-    fold into whatever tool result triggered the lazy-start, so the model reports it in its own next chat reply
-    (added 2026-10-31: running this silently meant the operator never saw it confirmed in chat at all, even
-    though it demonstrably ran and passed)."""
+    """The hard gate: runs the exact same 3 checks, right after sandbox_tools._call_sync lazy-starts a fresh
+    trio and before the operator's actual task proceeds in it (owner's own instruction, 2026-10-31: the safety
+    check must happen after the sandbox trio is created, and only on success does real work start inside it).
+    Deliberately plain sync, using _call_sync directly (NOT the async _call -- this function is invoked from
+    _call_sync's own lazy-start path, which asyncio.to_thread already moved onto a worker thread by the time
+    this runs; calling the async _call from here would need its own asyncio.to_thread hop for no reason, and
+    there is no running event loop in THIS thread to await against anyway). Returns (passed, reasons_text,
+    lines) -- lines is format_gate_lines(results), for the caller to fold into whatever tool result triggered
+    the lazy-start, so the model reports it in its own next chat reply (added 2026-10-31: running this silently
+    meant the operator never saw it confirmed in chat at all, even though it demonstrably ran and passed)."""
     results = []
     for c in CHECKS:
-        raw = _call("POST", "/run", {"kind": "bash", "code": c["cmd"], "name": "", "timeout": 10}, timeout=20)
+        raw = _call_sync("POST", "/run", {"kind": "bash", "code": c["cmd"], "name": "", "timeout": 10}, timeout=20)
         results.append({"check": c["key"], "cmd": c["cmd"], "raw": raw})
     passed, reasons = _evaluate(results)
     return passed, "; ".join(reasons), format_gate_lines(results)

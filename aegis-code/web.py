@@ -594,7 +594,7 @@ async def ws_endpoint(ws: WebSocket):
     # see only aegis-code/aegis-libraries at idle, including right after loading :8900, not have every page load silently spin up
     # 3 more containers. Any stale /dynamic_target/<name> or /REPL/work left on the host-backed volumes from before the trio was
     # last torn down gets cleaned the next time it genuinely starts (trio_control/start_trio.sh), not deferred forever.
-    if trio_client.trio_status().get("running"):
+    if (await asyncio.to_thread(trio_client.trio_status)).get("running"):
         try:
             sandbox_result = await cleanup_sandbox_scratch({}, ctx)
             await _send({"type": "terminal", "line": "-> cleanup_sandbox_scratch()"})

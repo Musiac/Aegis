@@ -75,7 +75,7 @@ def _finish(tool: str, data: dict, ctx: dict) -> dict:
     return data
 
 
-def _populate_working_copy(name: str, ctx: dict = None, force: bool = False) -> str:
+async def _populate_working_copy(name: str, ctx: dict = None, force: bool = False) -> str:
     """Right after a successful clone: copy the fresh pristine clone into the working copy the fixes are made in (and the static scanners
     re-scan). This is a fixed command that only differs by <name>; leaving it to the model cost a full round (17 s) at the start of every fix
     run. Returns a note for the model, or '' if it could not be done (the model then does it itself as before).
@@ -95,18 +95,18 @@ def _populate_working_copy(name: str, ctx: dict = None, force: bool = False) -> 
                 f"any fixes already applied to it are preserved. Re-scan/continue working on it as-is. If you genuinely need a fresh, "
                 f"unmodified copy (discarding any fixes already made), call redteam_clone_repo again with reset=true -- but that is a real, "
                 f"irreversible loss of whatever work is there now, so only do it if the operator asked for a clean restart.")
-    out = _sandbox_call("POST", "/run", {"kind": "bash", "code": f"rm -rf /dynamic_target/{name} && cp -r /dynamic_pristine/{name} /dynamic_target/{name} && echo POPULATED", "name": "", "timeout": 30}, timeout=45)
+    out = await _sandbox_call("POST", "/run", {"kind": "bash", "code": f"rm -rf /dynamic_target/{name} && cp -r /dynamic_pristine/{name} /dynamic_target/{name} && echo POPULATED", "name": "", "timeout": 30}, timeout=45)
     if "POPULATED" in json.dumps(out):
         if populated is not None:
             populated.add(name)
-        tree = _source_tree(name)
+        tree = await _source_tree(name)
         return (f"The working copy /dynamic_target/{name} is ALREADY populated from the fresh clone: do not run the cp yourself. "
                 f"Go straight to reading the files you need and scanning target {name!r}. "
                 + (f"Its source files (path, lines), so you do NOT need a find/ls round: {tree}" if tree else ""))
     return ""
 
 
-def _source_tree(name: str, limit: int = 80) -> str:
+async def _source_tree(name: str, limit: int = 80) -> str:
     """A compact list of the clone's source files with line counts, so the model can go straight to `cat -n` of the files it needs (a real run spent a
     whole 47 s round on `find` just to learn the layout)."""
     from .sandbox_tools import _call as _sandbox_call
@@ -128,18 +128,18 @@ def _source_tree(name: str, limit: int = 80) -> str:
         "            rows.append('%s (%d)' % (os.path.relpath(p, root), n))\n"
         f"print('TREE', len(rows), '; '.join(rows[:{limit}]) + (' ...' if len(rows) > {limit} else ''))\n"
     )
-    out = _sandbox_call("POST", "/run", {"kind": "python", "code": code, "name": "", "timeout": 20}, timeout=35)
+    out = await _sandbox_call("POST", "/run", {"kind": "python", "code": code, "name": "", "timeout": 20}, timeout=35)
     text = str(out.get("stdout") or "")
     return text.split("TREE", 1)[1].strip() if "TREE" in text else ""
 
 
-def _with_populate(result_text: str, ctx: dict = None, force: bool = False) -> str:
+async def _with_populate(result_text: str, ctx: dict = None, force: bool = False) -> str:
     try:
         d = json.loads(result_text)
     except ValueError:
         return result_text
     if isinstance(d, dict) and d.get("ok") and d.get("name"):
-        note = _populate_working_copy(str(d["name"]), ctx, force)
+        note = await _populate_working_copy(str(d["name"]), ctx, force)
         if note:
             d["note"] = (str(d.get("note") or "") + " " + note).strip()
             d["working_copy_ready"] = True
@@ -256,7 +256,7 @@ async def redteam_clone_repo(args: dict, ctx: dict) -> str:
                 return json.dumps({"ok": False, "error": r.json().get("detail") or f"HTTP {r.status_code}"})
             except ValueError:
                 return json.dumps({"ok": False, "error": f"the clone server answered HTTP {r.status_code}"})
-        return _with_populate(r.text, ctx, force=bool(args.get("reset")))
+        return await _with_populate(r.text, ctx, force=bool(args.get("reset")))
 
     # Handle different error types
     error_type = check_result.get("error_type")
@@ -348,7 +348,7 @@ async def redteam_clone_private_repo(args: dict, ctx: dict) -> str:
         except ValueError:
             return json.dumps({"ok": False, "error": f"the clone server answered HTTP {r.status_code}"})
 
-    return _with_populate(r.text, ctx, force=bool(args.get("reset")))
+    return await _with_populate(r.text, ctx, force=bool(args.get("reset")))
 
 
 async def _call_zap_streaming(target_url: str, emit) -> dict:
