@@ -19,3 +19,20 @@ Every row below is a timed run against the real backend, driven through the live
 
 All costs are metered Muse token cost for the whole conversation (every scan + every fix +
 the report), computed by `backend/model_pricing.py` from actual token usage.
+
+## Benchmarks: why we chose **Muse**
+
+We put **Muse Spark** in a drag race against our own self-hosted model — same repo, same job, same
+tool-calling loop: clone → static scan (gitleaks/Bandit/Semgrep/pip-audit/npm-audit) → live OWASP ZAP
+active pentest → fix → re-verify. No synthetic benchmark, just the real tool doing real work, timed.
+
+| Target | Type | Model / tier | Wall time | Cost |
+|---|---|---|---|---|
+| [`flemuh/radar-public-sector`](https://github.com/flemuh/radar-public-sector) | Public repo | **Muse Spark**, **contributor** tier | **18m 38s** (1118.0s) | $0.189 |
+| same repo, earlier run | Public repo | local qwen3.8-27b-sglang | 27m 19s (1639.1s) | $0.00 |
+| This repo (private) | Private repo | **Muse Spark**, **Standard** (non-contributor) tier | 7m 23s (442.9s) | $2.39 |
+
+**Muse Spark won by ~32%** — 18m38s vs 27m19s on an identical job. The sports car beat the home-grown
+hatchback running on our own GPU.
+
+**When Spark isn't enough, Muse Wonder is.** On a public repo with a very long list of scanner findings, [`openai/openai-agents-python`](https://github.com/openai/openai-agents-python), **Muse Spark** struggled to work through and fix everything the scanners reported, and its attempt was stopped after making little real progress. We switched the same job to its bigger brother, **Muse Wonder**, and **Muse Wonder** did the job: it fixed the static findings, stood up a real server and pentested it, and brought the ZAP findings down to 13 stable ones, in 16m 5s for $2.049. Wonder costs more per token and has no cheaper contributor tier, so Aegis uses Spark by default and Wonder is one click away in the model dropdown.
