@@ -12,19 +12,19 @@ ever gets through.*
 Think of Aegis as a guard dog that also happens to be a locksmith: it scans your code and container
 images, actively tests the locks on a target you point it at, picks the ones it finds weak, fixes them
 itself, then checks the door again to be sure it's really locked now. It doesn't stop at a report — it
-keeps looping scan → fix → re-scan until the scan comes back clean. It's powered entirely by Meta's Muse
-Spark Model and runs four skills: `redteam`, `fixredteam`, `pentest`, `fixpentest`. Built for the
+keeps looping scan → fix → re-scan until the scan comes back clean. It's powered entirely by Meta's **Muse Spark**
+and **Muse Wonder** models and runs four skills: `redteam`, `fixredteam`, `pentest`, `fixpentest`. Built for the
 [Meta Global Hackathon](https://dev.meta.ai/events/global-hackathon).
 
-Aegis is also careful with money: on public repos it uses Muse Spark's cheaper contributor tier (where
+Aegis is also careful with money: on public repos it uses **Muse Spark**'s cheaper contributor tier (where
 Meta may use the content to train its models); on private repos or its own code, it switches itself to
 the standard, non-contributor tier (content never used for training) — like checking your ticket before
 deciding which seat you get.
 
-We're **Musiacs** — Muse maniacs — at IdeaNirvana, and that's not a line, it's where the repo's name
+We're **Musiacs** — **Muse Maniacs** — at **IdeaNirvana**, and that's not a line, it's where the repo's name
 comes from (`Musiac/Aegis`). Before this hackathon even existed, we asked Meta's **Muse** (their personal
-AI agent, not the Muse model) to look at our own live product, [Jiina](https://ideanirvana.com/solutions/jiina),
-the way a stranger off the street would. On **12 October 2026**, logged in with a real test account, Muse
+AI agent, not the **Muse** model) to look at our own live product, [Jiina](https://ideanirvana.com/solutions/jiina),
+the way a stranger off the street would. On **12 October 2026**, logged in with a real test account, **Muse**
 ran two passive checks against `ideanirvana.com`, `ideanirvana.ai` and `solutions.ideanirvana.com`.
 Nothing critical turned up, but six real findings did — and we fixed every one the same day:
 
@@ -37,7 +37,7 @@ Nothing critical turned up, but six real findings did — and we fixed every one
 | Low | HSTS didn't cover subdomains | ✅ same day |
 | Info | No `security.txt` contact file | ✅ published |
 
-That's the moment that turned us into Musiacs, and the reason we built Aegis on Muse for this hackathon.
+That's the moment that turned us into Musiacs, and the reason we built Aegis on **Muse** for this hackathon.
 Full detail and every other Jiina security result is public at
 [ideanirvana.com/solutions/jiina](https://ideanirvana.com/solutions/jiina).
 
@@ -53,12 +53,12 @@ closed-source.
 ([`Musiac/Aegis`](https://github.com/Musiac/Aegis), created **27 October 2026**) built specifically for
 this hackathon, sharing no code history with Jiina. Everything here is new for this hackathon: the whole
 security-agent persona and skill set (`redteam`/`fixredteam`/`pentest`/`fixpentest`), the sandboxed
-clone → scan → fix → re-verify pipeline, the live OWASP ZAP active-pentest integration, Muse Spark as
-the driving model with the public/private billing safety switch (see Benchmarks), push-to-talk voice
+clone → scan → fix → re-verify pipeline, the live OWASP ZAP active-pentest integration, **Muse Spark** as
+the driving model (with the larger **Muse Wonder** for harder jobs) and the public/private billing safety switch (see Benchmarks), push-to-talk voice
 (Meta's own ASR, `muse-voice-transcribe-1.0`), and the structural guard in `core.py` that won't let the
 agent call a fix job done when it isn't (see the Run log). The one deliberate overlap with Jiina is the
 12 October 2026 passive-security story above — it predates this hackathon and is here only to show why
-we trust Muse enough to build Aegis on it, not as part of the submission's own work.
+we trust **Muse** enough to build Aegis on it, not as part of the submission's own work.
 
 ## What it does
 
@@ -90,20 +90,22 @@ survives a container restart or recreate, not just the current session, the same
 do. It re-checks afterward and reports the real result — every tool updated cleanly, or (if one failed) exactly
 which ones are still on their old version and that it's proceeding anyway.
 
-## Benchmarks: why we chose Muse
+## Benchmarks: why we chose **Muse**
 
-We put Muse Spark in a drag race against our own self-hosted model — same repo, same job, same
+We put **Muse Spark** in a drag race against our own self-hosted model — same repo, same job, same
 tool-calling loop: clone → static scan (gitleaks/Bandit/Semgrep/pip-audit/npm-audit) → live OWASP ZAP
 active pentest → fix → re-verify. No synthetic benchmark, just the real tool doing real work, timed.
 
 | Target | Type | Model / tier | Wall time | Cost |
 |---|---|---|---|---|
-| [`flemuh/radar-public-sector`](https://github.com/flemuh/radar-public-sector) | Public repo | Muse Spark, **contributor** tier | **18m 38s** (1118.0s) | $0.189 |
+| [`flemuh/radar-public-sector`](https://github.com/flemuh/radar-public-sector) | Public repo | **Muse Spark**, **contributor** tier | **18m 38s** (1118.0s) | $0.189 |
 | same repo, earlier run | Public repo | local qwen3.8-27b-sglang | 27m 19s (1639.1s) | $0.00 |
-| This repo (private) | Private repo | Muse Spark, **Standard** (non-contributor) tier | 7m 23s (442.9s) | $2.39 |
+| This repo (private) | Private repo | **Muse Spark**, **Standard** (non-contributor) tier | 7m 23s (442.9s) | $2.39 |
 
 **Muse Spark won by ~32%** — 18m38s vs 27m19s on an identical job. The sports car beat the home-grown
 hatchback running on our own GPU.
+
+**When Spark isn't enough, Muse Wonder is.** On a public repo with a very long list of scanner findings, [`openai/openai-agents-python`](https://github.com/openai/openai-agents-python), **Muse Spark** struggled to work through and fix everything the scanners reported, and its attempt was stopped after making little real progress. We switched the same job to its bigger brother, **Muse Wonder**, and **Muse Wonder** did the job: it fixed the static findings, stood up a real server and pentested it, and brought the ZAP findings down to 13 stable ones, in 16m 5s for $2.049. Wonder costs more per token and has no cheaper contributor tier, so Aegis uses Spark by default and Wonder is one click away in the model dropdown.
 
 ## Meta models vs. OS/browser features
 
@@ -113,6 +115,9 @@ Here is exactly which parts of Aegis are a Meta model call and which are a plain
 - **`muse-spark-1.3` / `muse-spark-1.3-contributor`** (Model API) — every chat turn, tool-calling decision,
   and fix the agent writes. The contributor tier is used automatically for public repos, the Standard tier
   for private repos/self-scans.
+
+- **`muse-wonder-1.0`** (Model API) — Meta's larger model, selectable in the model dropdown for jobs where **Muse Spark**
+  struggles (for example the very long findings list on `openai/openai-agents-python`). Standard tier only; Meta offers no contributor tier for it.
 
 - **`muse-voice-transcribe-1.0`** (`wss://api.meta.ai/v1/asr/realtime`) — push-to-talk's speech-to-text,
   when the mic button is used.
@@ -128,7 +133,7 @@ Here is exactly which parts of Aegis are a Meta model call and which are a plain
 
 ## Testing
 
-We ran Aegis end to end on six real public repositories, from small to large: clone, static scan, a live OWASP ZAP pentest where the repo can be run, fix, re-verify, export and report. Every run was timed and its cost metered. Five of the six finished clean on the static scanners; the sixth had 3 pip-audit findings the tool cannot fix, because the repository's own package pins conflict. Runs took about 1 to 20 minutes and cost $0.30 to $2.50. One run (`openai/openai-agents-python`) needed a stronger model tier after a first attempt on Muse Spark's contributor tier stalled; the details are in the results file.
+We ran Aegis end to end on six real public repositories, from small to large: clone, static scan, a live OWASP ZAP pentest where the repo can be run, fix, re-verify, export and report. Every run was timed and its cost metered. Five of the six finished clean on the static scanners; the sixth had 3 pip-audit findings the tool cannot fix, because the repository's own package pins conflict. Runs took about 1 to 20 minutes and cost $0.30 to $2.50. One run (`openai/openai-agents-python`, a repo with a very long findings list) needed the bigger **Muse Wonder** model after **Muse Spark** struggled with it; the details are in the results file.
 
 Full table with dates, wall times, costs and outcomes: **[test/test_results.md](test/test_results.md)**.
 
@@ -231,7 +236,7 @@ The full record of the six sandbox attacks and their results is in [aegis_securi
 
 Two fixed-height panes side by side, each scrolling independently: the live terminal (scan/fix
 progress) on the left, the chat conversation on the right. The header holds the model dropdown
-(**Muse Spark** — your own key), a running "Total cost" readout (the real, metered LLM token cost for the session so far, updated after every
+(**Muse Spark** or **Muse Wonder** — your own key), a running "Total cost" readout (the real, metered LLM token cost for the session so far, updated after every
 turn), and a connection status indicator. No audio controls — text in, text out.
 
 Under both panes sits a strip of example questions (six at a time, shown shortened). Clicking one puts

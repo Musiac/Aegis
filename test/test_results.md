@@ -15,7 +15,7 @@ Every row below is a timed run against the real backend, driven through the live
 | 2026-10-30 | [`aws/sagemaker-python-sdk`](https://github.com/aws/sagemaker-python-sdk) | 19m 46s | $2.504 | Static clean except 3 pip-audit findings, not fixable by this tool (repo's own package pins conflict) |
 | 2026-10-30 | [`openai/openai-agents-python`](https://github.com/openai/openai-agents-python) \* | 16m 5s | $2.049 | Static clean; real server stood up and pentested; ZAP down to 13 stable findings |
 
-\* A Spark (Contributor) attempt on this repo was aborted — it made little real progress. Spark successfully finished all other repos above; this one needed Wonder to complete.
+\* A Spark (Contributor) attempt on this repo was aborted — it made little real progress. Spark successfully finished all other repos above; this one needed the bigger Muse Wonder model to complete.
 
 All costs are metered Muse token cost for the whole conversation (every scan + every fix +
 the report), computed by `backend/model_pricing.py` from actual token usage.
