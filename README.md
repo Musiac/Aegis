@@ -204,7 +204,7 @@ conversation. We've been adding skills to it ever since.
 LightMA — a Lightweight MultiAgentic framework — is built on many guardrails and gentle nudges which keep
 either a single-agentic solution like Aegis, or any multi-agentic system, on track to ensure it never
 loses sight of the original task given by the user. This ensures Aegis always finishes the task it
-receives. Below are the guardrails and nudges Aegis has:
+receives. Below are the guardrails and nudges Aegis has (the same list is also kept as a plain-text file: [aegis_guardrails_and_nudges.txt](aegis_guardrails_and_nudges.txt)):
 
 1. Task-completion nudges:
    1. Billing-disclosure guard -- tells model to continue after disclosure-only round.
