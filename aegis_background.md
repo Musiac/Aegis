@@ -24,11 +24,21 @@ That's the moment that turned us into Musiacs, and the reason we built Aegis on 
 Full detail and every other Jiina security result is public at
 [ideanirvana.com/solutions/jiina](https://ideanirvana.com/solutions/jiina).
 
+## Why we built our own agent loop
+
+For Aegis we looked at the frameworks in common use: LangChain, LangGraph, Microsoft Agent Framework, Google ADK and Strands. They carry a huge overhead because they have so many features. We wanted something lightweight, yet simple enough to read and reason about from end to end.
+
+A multi-agent architecture was not a fit either. Aegis's skills (red-teaming, pentesting and fixing the issues found in any repo) make it a single-operator agent doing real, consequential work: writing code fixes and running active security scans. Orchestrating and routing between several agents would add considerable overhead for no gain.
+
+We did not have to look any further. We had already written our own LiveMA framework for Jiina, our single-agent, live two-way voice assistant, whose skills cover the enterprise: ERP solutions like SAP and JDE, ServiceNow, Salesforce, DB Intelligence, RFP generation, document editing and many more. So for Aegis, our cybersecurity guard and shield, we wrote our own single-agent loop (LightMA) and did not use any of the large, overhead-heavy, common multi-agent frameworks. More on it in [aegis_architecture.md](aegis_architecture.md).
+
+Aegis has four skills: `redteam`, `pentest`, `fixredteam` and `fixpentest`. We built them for one purpose: ease of use. It is literally point and forget. To use Aegis, a user just gives it the URL of a public repo, and that is it. Aegis takes over: it clones the repo, uses `redteam` and `pentest` to find the issues in the code, and uses `fixredteam` and `fixpentest` to hand back a zip file of the fully fixed code. It fixes not only the critical issues but the medium and low priority ones too.
+
 ## How Aegis relates to Jiina, and what was built this week
 
 IdeaNirvana LLC is an existing startup; this hackathon entry is submitted in the Startup track by its
 sole founder/developer. Our existing live product, [Jiina](https://ideanirvana.com/solutions/jiina), is
-a multi-agentic assistant with its own unrelated skills (document editing, SAP/ServiceNow/Jira
+a single-agent, live voice assistant with its own unrelated skills (document editing, SAP/ServiceNow/Jira
 workflows, reporting). **Jiina's code and git history are not part of this repository** and stay
 closed-source.
 
