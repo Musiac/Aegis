@@ -126,23 +126,11 @@ Here is exactly which parts of Aegis are a Meta model call and which are a plain
   `install.sh` never starts it and the UI never calls it. A Gemini one-shot TTS path (`/api/tts`, `GEMINI_TTS_MODEL_NAME`) also still exists server-side from an
   earlier build, same reasoning as Kokoro (a competitor's model) — never gets called by the current UI either.
 
-## Run matrix: repeatability evidence
+## Testing
 
-Every row below is a timed run against the real backend, driven through the live `/ws` chat API end to end (clone, static scan, dynamic/active pentest where a server exists, fix, re-verify, export, report) — one row per repo, its last successful run.
+We ran Aegis end to end on six real public repositories, from small to large: clone, static scan, a live OWASP ZAP pentest where the repo can be run, fix, re-verify, export and report. Every run was timed and its cost metered. Five of the six finished clean on the static scanners; the sixth had 3 pip-audit findings the tool cannot fix, because the repository's own package pins conflict. Runs took about 1 to 20 minutes and cost $0.30 to $2.50. One run (`openai/openai-agents-python`) needed a stronger model tier after a first attempt on Muse Spark's contributor tier stalled; the details are in the results file.
 
-| Date | Target | Wall time | Cost | Outcome |
-|---|---|---|---|---|
-| 2026-10-30 | [`usestrix/strix`](https://github.com/usestrix/strix) | 5m 57s | $0.904 | Static clean; ZAP 3 informational-only findings left |
-| 2026-10-30 | [`google/pica`](https://github.com/google/pica) | 1m 13s | $0.297 | Static clean (no dynamic — no cargo toolchain) |
-| 2026-10-30 | [`microsoft/TokenEconomizer`](https://github.com/microsoft/TokenEconomizer) | 4m 9s | $0.760 | Static clean |
-| 2026-10-30 | [`aws/tools-for-devops-agent`](https://github.com/aws/tools-for-devops-agent) | 8m 25s | $1.077 | Static clean |
-| 2026-10-30 | [`aws/sagemaker-python-sdk`](https://github.com/aws/sagemaker-python-sdk) | 19m 46s | $2.504 | Static clean except 3 pip-audit findings, not fixable by this tool (repo's own package pins conflict) |
-| 2026-10-30 | [`openai/openai-agents-python`](https://github.com/openai/openai-agents-python) \* | 16m 5s | $2.049 | Static clean; real server stood up and pentested; ZAP down to 13 stable findings |
-
-\* A Spark (Contributor) attempt on this repo was aborted — it made little real progress. Spark successfully finished all other repos above; this one needed Wonder to complete.
-
-All costs are metered Muse token cost for the whole conversation (every scan + every fix +
-the report), computed by `backend/model_pricing.py` from actual token usage.
+Full table with dates, wall times, costs and outcomes: **[test/test_results.md](test/test_results.md)**.
 
 ## Why this exists
 
@@ -204,41 +192,7 @@ conversation. We've been adding skills to it ever since.
 LightMA — a Lightweight MultiAgentic framework — is built on many guardrails and gentle nudges which keep
 either a single-agentic solution like Aegis, or any multi-agentic system, on track to ensure it never
 loses sight of the original task given by the user. This ensures Aegis always finishes the task it
-receives. Below are the guardrails and nudges Aegis has (the same list is also kept as a plain-text file: [aegis_guardrails_and_nudges.txt](aegis_guardrails_and_nudges.txt)):
-
-1. Task-completion nudges:
-   1. Billing-disclosure guard -- tells model to continue after disclosure-only round.
-   2. "You haven't fixed anything yet" nudge -- forces edit_file when findings exist.
-   3. "Fixed but never finished" nudge -- forces export + report after a fix.
-   4. Nudge count cap -- at most one of each nudge per turn.
-   5. Server-start-give-up guard -- stops retrying a server after 2 failures.
-   6. MAX_ROUNDS hard ceiling -- turn can never run truly unbounded.
-   7. Deliverable-gap decided before "Completed" footer -- no premature done message.
-
-2. Model/billing safety:
-   1. Contributor-tier fail-closed downgrade -- auto-switches off Contributor for private targets.
-   2. Downgrade narration -- tells operator when and why the switch happened.
-   3. Pre-clone private-repo warning -- refuses to clone before asking first.
-   4. Immediate "no" honored -- answer read directly, cancels with zero further work.
-   5. Busy/stop outranks warning gate -- stop can't be swallowed by a confirm prompt.
-   6. Sticky confirmation -- never re-asks the same operator twice in a session.
-
-3. Capacity/resource guards:
-   1. Pre-clone size check -- checks repo size and quota before cloning.
-   2. Real-time disk watcher -- kills a command that overshoots the cap mid-run.
-   3. Housekeeping bypass -- cleanup commands exempt from the full-disk block.
-   4. No silent re-wipe -- re-cloning keeps existing fixes unless reset=true.
-
-4. Accuracy/honest-reporting guards:
-   1. Code-computed tallies -- model must copy scan numbers exactly, never estimate.
-   2. Word-report count check -- rejects a report whose numbers don't match the scan.
-   3. Never re-narrate rule -- stops the model repeating an already-reported fact.
-   4. Deterministic terminal narration -- code announces each phase, not the model.
-
-5. Guaranteed cleanup/delivery:
-   1. Sandbox app auto-stop -- server stopped in code the moment a report ships.
-   2. Report-in-zip -- Word report also saved inside the export zip.
-   3. Fresh scratch per session -- scratch space cleared at every new connect.
+receives. The full list of guardrails and nudges is in [aegis_guardrails_and_nudges.txt](aegis_guardrails_and_nudges.txt).
 
 ## Architecture
 
