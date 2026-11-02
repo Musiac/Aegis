@@ -200,81 +200,32 @@ receives. The full list of guardrails and nudges is in [aegis_guardrails_and_nud
 
 ![Aegis architecture: browser → aegis-code → aegis-libraries/sandbox-proxy, with the code-fix sandbox isolated behind --network none, Meta's Model API and GitHub as the only external services, and host-mounted volumes for scan targets and exported fixes](docs/assets/aegis_architecture-technical.png)
 
-**2 permanent containers + an ephemeral, on-demand sandbox trio** (refactored 2026-10-31 — previously
-6 containers, all permanent):
+Aegis runs as two kinds of containers:
 
-- **aegis-code/** (renamed from `backend/`) — the thin chat loop. Built once, run two ways: `aegis-code`
-  as a daemon (serves the web UI on `:8900`, started by `install.sh`) and the CLI as a separate,
-  interactive `docker run -it --rm ...` (see Install) using the same image. Reaches `aegis-libraries`
-  over `aegis-net` (a bridge network) by container name, and the sandbox trio over the `aegis-sock`
-  named volume (AF_UNIX sockets can't bind inside a bind-mounted host dir on Docker Desktop/macOS,
-  confirmed live, hence a named volume + a container that shares it, not a plain host process). Picks an
-  LLM provider from `.env` (`AEGIS_PROVIDER`, or the first one with a key configured) — `muse` (Meta's
-  Muse Spark) is the only provider in the dropdown, auto-selecting the cheaper contributor tier for
-  confirmed-public repos and the regular tier for everything else (private repos, self-scans). Gemini and
-  Claude remain usable via `AEGIS_PROVIDER`/the auto-route env vars below even though the web UI's
-  dropdown doesn't list them. No MCP server layer, no voice/audio, no multi-account login — single
-  operator, bring your own Muse Spark key.
+- **Permanent containers (2), always running:**
+  - **`aegis-code`** holds the Aegis main code: the chat loop, the web UI and the CLI.
+  - **`aegis-libraries`** holds all the scanner libraries and tools: gitleaks, Bandit, Semgrep, pip-audit, npm audit, Trivy and OWASP ZAP.
+- **Short-lived containers (3), created on demand:** a sandbox trio (`aegis-sandbox`, `aegis-sandbox-proxy`, `aegis-sandbox-web`) that exists only while a task needs a sandbox and is removed after 5 minutes of no use.
 
-  **Optional per-skill routing (based on `.env` setting):** set both
-  `AEGIS_SCAN_PROVIDER` and `AEGIS_FIX_PROVIDER` to route a plain scan/pentest request to one
-  provider and a fix/remediate request to another, automatically, by each message's own wording —
-  nothing is sent anywhere until the operator opts in by setting both.
+**Why the code and the libraries are in separate containers:** the scanner libraries are large. If everything lived in one container, every small code change would force a rebuild of that whole heavy image, and each deploy would take a long time. With the split, a code change rebuilds only the small `aegis-code` image, so builds and deploys are fast. The heavy libraries image changes rarely.
 
-  `check_scanner_versions` runs automatically at every connect and, as of 2026-10-31, **auto-updates any
-  outdated scanner tool itself** — no operator confirmation asked or needed (there is no real scenario
-  where the answer would ever be no); it just reports what it found and updated.
+Every container, network, volume and port is described in [container_details.md](container_details.md).
 
-- **aegis-libraries/** (merged from `redteam/` + `pentestlive/`) — one container, two processes: static
-  scanners (gitleaks, Bandit, Semgrep, pip-audit, npm audit, Trivy, OWASP ZAP) on `:7906`, and the one
-  active, consent-gated probe (liveness + technology detection) against a URL you name, via
-  [ProjectDiscovery's httpx](https://github.com/projectdiscovery/httpx) (`pd-httpx`), on `:7907`. Reads a
-  read-only mounted copy of the target; runs on `aegis-net` (a bridge network), not `--network host`
-  (Docker Desktop doesn't route `--network host` to localhost reliably). Trivy scans a local image
-  tarball mounted read-only at `/images/<name>.tar` — `install.sh` `docker save`s each of Aegis's own
-  images into `images/` for exactly this, so Trivy has something real to scan out of the box.
+## Security
 
-- **The sandbox trio — `aegis-sandbox` / `aegis-sandbox-proxy` / `aegis-sandbox-web` — is EPHEMERAL, not a
-  permanent daemon.** At idle, none of these 3 containers exist; only `aegis-code` + `aegis-libraries` run.
-  The moment a real task touches the sandbox (the first `bash_run`, clone, or similar), a small host-side
-  process — `trio_control/server.py`, never itself containerized, since `aegis-code` deliberately has no
-  `docker.sock` and shouldn't get one — creates all 3 containers, runs a hard safety-gate check against the
-  freshly-created sandbox (3 real isolation checks: can't write outside it, can't reach the internet, real
-  resource caps enforced), and only on success does the triggering call proceed; a failed gate tears the
-  trio back down immediately. `trio_control` exposes exactly `start`/`stop`/`status`/`touch` over
-  `127.0.0.1`, bearer-token gated — never a generic Docker API, so even full compromise of `aegis-code`
-  can't pivot into controlling any other container on the host. After 5 minutes of no sandbox activity, a
-  background reaper inside `trio_control` tears the trio back down on its own. During an active task you'll
-  see 5 containers; at every other time, 2.
+Aegis attacks other people's code, so we treated its own security as a first-class feature. In short:
 
-  `aegis-sandbox` — the isolated code sandbox `fixredteam`/`fixpentest` write real fixes in.
-  `--network none`, read-only root, non-root, capped CPU/memory/processes. Each target has a read-only
-  pristine copy and a working copy it edits (`/self_target/self` for "self", `/dynamic_target/<name>` for
-  a cloned repo), the same directory `aegis-libraries` re-scans. Exports finished work to `/aegis_out` on
-  the host — the only way anything leaves it. `.env` is never copied in. `aegis-sandbox-proxy` is the only
-  container with real network access (a CONNECT-only proxy allowing exactly `pypi.org`,
-  `files.pythonhosted.org`, `registry.npmjs.org`), reached by `aegis-sandbox` over a Unix socket since it
-  has no network device at all. `aegis-sandbox-web` hosts a cloned project's own server (after fixes are
-  applied) so an active ZAP pentest has something genuinely running to attack.
+- **We ran Aegis on itself ("eat your own dog food").** Aegis scanned and fixed its own source, and the Strix pentester found 4 real bugs in it that static scanners miss; we fixed every one and a fresh run confirmed they stayed fixed.
+- **We tried to break out of the sandbox ourselves.** Six real attacks against the live sandbox (deleting host files, exfiltrating data, resource bombs, stealing keys, container breakout, a zip symlink trick). Five were blocked or contained; the sixth found a real bug in our export step, which we fixed and re-verified.
+- **The sandbox is locked down:** no network device at all, read-only root, non-root user, zero Linux capabilities, capped CPU, memory and processes. Its only way out to the internet is an allow-list proxy (PyPI and npm only), and finished work leaves only through one export folder.
+- **The main container has no Docker access.** A small host-side helper creates and removes the sandbox containers, accepts only four commands (`start`, `stop`, `status`, `touch`) on localhost with a token, and runs a safety check on every new sandbox before it is used.
+- **Real credentials never enter the sandbox,** and secrets in commands and logs are masked.
+- **Active attacks need consent.** A live probe of a real URL runs only when you type the exact consent word; active scanning otherwise targets only servers Aegis stood up itself in the sandbox.
+- **Private code is protected by default:** private repos and Aegis's own code automatically use the non-training model tier, and Aegis warns before cloning a private repo.
+- **Aegis keeps its own scanners current:** it checks scanner versions every time you connect and updates outdated tools itself.
+- **The agent cannot call a job done when it isn't:** structural guards force the fix and report steps, and report numbers are computed by code, not by the model.
 
-## Sandbox security: live-tested, not theorized (2026-10-27)
-
-Pointing an AI agent at a stranger's public repo and letting it clone, run, and actively pentest that
-repo's own server is itself a real attack surface — the cloned code could be malicious. So instead of
-just asserting the sandbox is safe, we tried to break out of it ourselves. Think of the sandbox as a
-padded room with the Wi-Fi cable cut: no doors to the host, no socket to phone home on, nothing sharp
-within reach. We ran six real attacks directly against the live `aegis-sandbox` container (the exact
-one `fixredteam`/`fixpentest` use to apply fixes), through the same `bash_run`/`export_project` code
-paths the agent itself uses:
-
-| # | Attack | Result |
-|---|---|---|
-| 1 | `rm -rf` outside the sandbox (e.g. the real Mac's `~/Downloads`) | **Blocked** — the real host filesystem is architecturally invisible; `ls /` inside the sandbox shows only its own mounted directories, nothing of the host. |
-| 2 | Exfiltrate data to an external server (a real DGX address) | **Blocked** — `--network none` means no network device exists at all (`socket.gaierror: Temporary failure in name resolution`); even a "direct" attempt auto-routed through the install-only egress proxy, which returned `403 Forbidden` for a non-PyPI/npm destination. The legitimate path (PyPI, for installing dependencies) still returned `200 OK`. |
-| 3 | Resource exhaustion (CPU spin, memory bomb, fork bomb) | **Contained** — memory bomb (tried ~20GB against a 4GB cap) was `SIGKILL`'d after 9.3s; fork bomb hit the 256-PID cap immediately; the sandbox answered the very next command in 0.01s in both cases — never crashed, never affected anything outside itself. |
-| 4 | Read real credentials (`MUSE_API_KEY`, GitHub tokens) from inside the sandbox | **Blocked** — no real `.env` file is reachable anywhere in the sandbox's filesystem, only inert `.env.example` templates; `.env` is deliberately never copied in. |
-| 5 | Container breakout (Docker socket, root, kernel writes) | **Blocked** — no Docker socket present; all Linux capabilities are zeroed at the kernel level (`CapEff: 0000000000000000`); running as non-root (`uid=1001`); root filesystem remount refused; `/proc/sys` writes refused (read-only). |
-| 6 | Symlink/zip-slip attack on the exported fix zip | **Found, then fixed and re-verified live (2026-10-27)**: `export_project` originally dereferenced symlinks into the zip rather than storing the link — a planted `/etc/passwd` symlink was exported as 880 bytes of real content. Fixed by adding `-y` to the `zip` command (store symlinks as symlinks); re-ran the identical attack against the rebuilt sandbox and confirmed the exported zip now extracts `leaked_passwd.txt` as an actual 11-byte symlink pointing at `/etc/passwd`, not dereferenced content. |
+The full record of the six sandbox attacks and their results is in [aegis_security_details.md](aegis_security_details.md).
 
 ## UI
 
