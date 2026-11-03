@@ -1,4 +1,6 @@
-* text=auto
+# Shell scripts run inside Linux containers (and install.sh under bash/WSL2): a CRLF checkout -- git's default
+# on Windows, core.autocrlf=true -- turns the shebang into "#!/bin/bash\r" and the container fails to start.
+# The same goes for the other files the containers read as-is, so all of these are always checked out with LF line endings.
 *.sh text eol=lf
 Dockerfile* text eol=lf
 *.py text eol=lf
