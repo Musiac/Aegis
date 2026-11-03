@@ -29,6 +29,7 @@ import re
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -169,6 +170,36 @@ def _writable_copy(project: str, root: str, buf: list) -> str:
     return dest
 
 
+# Why this exists (found 2026-11-03, a pentest run where ZAP's active scan never started): the pentest scanner runs in a DIFFERENT container
+# (aegis-libraries) and reaches the app over aegis-net as www.sandbox.com:<port>. An app bound to 127.0.0.1 only answers inside this container,
+# so the scanner got "connection refused", its spider found nothing, and the active scan had no pages to attack. The readiness probe above
+# connects to 127.0.0.1 and so could not see the problem, and the start result still told the model the app was reachable on the network.
+_LOOPBACK_BIND_RE = re.compile(r"(--host[= ]|--bind[= ]|-b[= ]?)(127\.0\.0\.1|localhost)", re.I)
+_LOOPBACK_KWARG_RE = re.compile(r"(\bhost\s*=\s*)([\"'])(127\.0\.0\.1|localhost)\2", re.I)
+
+
+def _bind_all_interfaces(cmd: str):
+    """Rewrite an explicit loopback bind in a start command to 0.0.0.0. Returns (command, True if anything was rewritten)."""
+    new = _LOOPBACK_BIND_RE.sub(lambda m: m.group(1) + "0.0.0.0", cmd)
+    new = _LOOPBACK_KWARG_RE.sub(lambda m: m.group(1) + m.group(2) + "0.0.0.0" + m.group(2), new)
+    return new, new != cmd
+
+
+def _reachable_from_network(port: int) -> bool:
+    """True if the app answers on this container's own network address (what the scanner container connects to), not just on loopback."""
+    try:
+        ip = socket.gethostbyname(socket.gethostname())
+    except Exception:                                                             # noqa: BLE001
+        return False
+    try:
+        urllib.request.urlopen(f"http://{ip}:{port}/", timeout=2.5)  # nosec B310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- this container's own address, http only
+        return True
+    except urllib.error.HTTPError:
+        return True
+    except Exception:                                                             # noqa: BLE001
+        return False
+
+
 def _start(project: str, cmd: str, ready_seconds: float, install: bool = True):
     if not _NAME_RE.match(project):
         return {"ok": False, "error": f"{project!r} is not a safe project name."}
@@ -178,6 +209,7 @@ def _start(project: str, cmd: str, ready_seconds: float, install: bool = True):
     entry = os.path.join(root, "backend", "web.py")
     default_cmd = f"uvicorn backend.web:app --host 0.0.0.0 --port {APP_PORT}"
     use_cmd = (cmd or "").strip() or default_cmd
+    use_cmd, rebound = _bind_all_interfaces(use_cmd)
     if not cmd and not os.path.isfile(entry):
         return {"ok": False, "error": f"no backend/web.py under {root}; this project is not shaped like a FastAPI app on the default convention "
                                        f"-- pass an explicit start command instead of relying on the default."}
@@ -206,8 +238,15 @@ def _start(project: str, cmd: str, ready_seconds: float, install: bool = True):
             tail = "\n".join(buf[-40:])
             _stop_locked()
         return {"ok": False, "error": f"the app exited immediately (exit code {proc.returncode}). Last output:\n{tail}"}
+    if ready and not _reachable_from_network(APP_PORT):
+        with _state_lock:
+            _stop_locked()
+        return {"ok": False, "error": f"the app answers on loopback inside this container but NOT on its network address, so the scanner container "
+                                       f"could not reach it. Start it listening on 0.0.0.0 (for example --host 0.0.0.0), not 127.0.0.1 or localhost. "
+                                       f"Command used: {use_cmd}"}
     install_log = "\n".join(x for x in buf if x.startswith("[deps]"))
     return {"ok": ready, "project": project, "port": APP_PORT, "cmd": use_cmd, "install_log": install_log,
+            "note_rebound": "the start command asked for a loopback-only bind; it was changed to 0.0.0.0 so the scanner container can reach the app" if rebound else None,
             "error": None if ready else f"started (pid alive) but did not answer on :{APP_PORT} within {ready_seconds}s -- it may still be booting; "
                                           "check status again, or read its log."}
 

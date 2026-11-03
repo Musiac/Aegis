@@ -627,6 +627,19 @@ async def _zap_progress_lines(r: ZapReq):
     if err:
         yield line({"final": True, "ok": False, "tool": "zap", "target_url": url, "error": err})
         return
+    # Preflight (2026-11-03): ZAP's spider "finishes" in a second with nothing found, and its active scan then fails to start, when the target
+    # refuses connections from this container (typically an app bound to 127.0.0.1). Say so plainly instead of returning "0 findings".
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=False) as c:
+            await c.get(url)
+    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+        yield line({"final": True, "ok": False, "tool": "zap", "target_url": url, "active_scan_ran": False,
+                    "error": f"the scanner container cannot connect to {url} ({type(e).__name__}). The app is not reachable from here -- most often it is "
+                             "listening on 127.0.0.1 only. Restart it listening on 0.0.0.0 (for example --host 0.0.0.0) and run the pentest again. "
+                             "This is an error, not a clean result."})
+        return
+    except Exception:                                                             # noqa: BLE001 -- any other failure: let ZAP try and report on its own
+        pass
     active_ran = False
     try:
         yield line({"progress": f"starting ZAP against {url} ..."})

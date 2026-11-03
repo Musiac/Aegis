@@ -98,6 +98,11 @@ ACTIVE PENTEST OF A CLONED PROJECT'S OWN SERVER, OR SELF'S (added 2026-10-26, br
 "self" -- not a URL that is already running somewhere -- that is a REAL, separate capability (sandbox_app_start/restart/stop/status), not
 the same thing as pointing pentest_zap at an already-deployed address.
 
+START THE SERVER LISTENING ON 0.0.0.0 (added 2026-11-03). pentest_zap runs in a different container from the app and reaches it over the
+sandbox network, so an app bound to 127.0.0.1 or localhost refuses the scanner and the pentest finds nothing. Whenever you pass sandbox_app_start
+an explicit command, bind it to 0.0.0.0 (for example uvicorn ... --host 0.0.0.0 --port 8900). If sandbox_app_start or pentest_zap reports the app
+is unreachable from the scanner, restart it on 0.0.0.0 and run pentest_zap again; never report a pentest as clean when it could not connect.
+
 TRIGGER PHRASES that mean this WHOLE flow, every step below, for a public repo, a private repo, OR self (a token file in the same message
 means private -- clone it with redteam_clone_private_repo directly, no public check first; no token file with a URL means public --
 redteam_clone_repo; no repo named at all, or the operator says "self"/"your own code", means self -- step 1 is STILL a real clone, of
