@@ -364,6 +364,14 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
                 end_reason = "answered"
                 return
             messages.append({"role": "assistant", "content": text, "tool_calls": calls})
+            # Measurement marker: the first edit_file of a turn is where issue COLLECTION ends and FIXING begins. Log the cost and time
+            # accrued up to that point (once per turn) so a run's collection-only cost can be read separately from its total cost.
+            if ctx.get("_collection_logged_turn") != turn_id and any(c["name"] == "edit_file" for c in calls):
+                ctx["_collection_logged_turn"] = turn_id
+                turnlog.log("collection_done", sid=sid, turn=turn_id, round=rounds, findings=turn_findings_total,
+                            cost_before_this_round=round(ctx["session_cost_usd"] - round_cost - cost0, 4),
+                            cost_incl_this_round=round(ctx["session_cost_usd"] - cost0, 4),
+                            elapsed_s=round(time.monotonic() - wall0, 1))
             for tc in calls:
                 sig = (tc["name"], json.dumps(tc["arguments"], sort_keys=True, default=str))
                 seen_calls[sig] += 1
