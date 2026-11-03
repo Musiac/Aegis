@@ -27,6 +27,12 @@ Think of **Aegis** as a guard dog that is also a locksmith. It scans your code a
 
 You need Docker (running), a bash shell (Linux, macOS, or WSL2), `rsync`, `python3`, `curl`, and a **Muse** API key.
 
+**What your computer needs**
+- **Disk:** at least **25 GB free**. **Aegis** uses about 12 GB once installed, and about 17 GB at the peak of the first install.
+- **Memory:** at least **8 GB of RAM**, with **4 GB free**. **Aegis** itself peaked at about 2 GB in our tests; Docker needs the rest.
+- **Processor:** at least a **quad-core** (4 cores). **Aegis** uses every core it can during a scan, so more cores finish sooner.
+- **Internet:** the first install downloads roughly 3 GB.
+
 <details>
 <summary><b>New computer? How to install Docker (and WSL 2 on Windows)</b></summary>
 
@@ -52,7 +58,7 @@ Docker Desktop is free for personal use and small businesses; larger companies n
 git clone https://github.com/Musiac/Aegis
 cd Aegis
 cp .env.example .env     # then, in this folder, open the file .env, find the line MUSE_API_KEY= , type your own Meta API key after it, and save the file
-bash install.sh          # builds and starts everything; it can take 5 to 10 minutes. If an "Allow" pop-up appears, click Allow
+bash install.sh          # builds and starts everything; it can take 5 to 10 minutes (longer on slow internet). If an "Allow" pop-up appears, click Allow
 ```
 
 While it installs, a progress line with a spinner and a running clock shows that it has not hung. When it finishes, open Docker and you will see two new containers, `aegis-code` and `aegis-libraries`. (A short-lived sandbox of three more containers starts when **Aegis** needs it and is removed after 5 idle minutes.)
