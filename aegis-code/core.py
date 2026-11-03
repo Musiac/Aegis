@@ -25,6 +25,32 @@ MAX_ROUNDS = int(os.environ.get("AEGIS_MAX_ROUNDS", "200"))
 # itself (scan-only vs. scan-and-fix) -- reused here so a personal scan/fix provider split (see llm.scan_fix_providers) routes each turn
 # to the right model BEFORE the call even happens, not just as a prompt instruction the model could ignore.
 _FIX_WORDS = re.compile(r"\b(fix|fixes|fixed|fixing|remediat\w*|patch|mitigat\w*|eliminat\w*|resolv\w*|repair\w*|harden\w*)\b", re.I)
+_KEEP_FLAG = re.compile(r"\s*(continue|yes\b.*|ok\b.*|okay\b.*|go on|go ahead|proceed|do it|please do)[.! ]*", re.I)
+_SAY_YES = re.compile(r"\s*(yes\b.*|ok\b.*|okay\b.*|go ahead|proceed|do it|please do)[.! ]*", re.I)
+
+# The tools that change the project or package the fixed copy. A plain scan or pentest request never gets them (see fix_gate).
+_FIX_ONLY_TOOLS = ("edit_file", "export_project")
+
+
+def detect_fix_task(ctx: dict, text: str) -> None:
+    """Set ctx["fix_task"] from the operator's latest message: True when it asks for a fix, or says a plain "yes" / "go ahead" right after a scan
+    that ended with the offer to fix; False for any other new request; unchanged for a short "continue" (a paused job resumes as it was)."""
+    if _FIX_WORDS.search(text):
+        ctx["fix_task"], ctx["fix_offered"] = True, False
+    elif ctx.get("fix_offered") and _SAY_YES.fullmatch(text):
+        ctx["fix_task"], ctx["fix_offered"] = True, False
+    elif not _KEEP_FLAG.fullmatch(text):
+        ctx["fix_task"] = False
+
+
+def fix_gate(ctx: dict, tool_name: str, is_task: bool) -> str | None:
+    """None when the tool may run. Otherwise the JSON refusal to hand back to the model INSTEAD of running it: the project is only changed or
+    packaged as fixed when the operator's request asked for a fix (the prompt says so too, but a small model can ignore a wording-only rule)."""
+    if tool_name in _FIX_ONLY_TOOLS and is_task and not ctx.get("fix_task"):
+        return json.dumps({"ok": False, "refused": True,
+                           "error": "The operator did not ask for a fix, so this tool is not available. Do not change or export any code. Finish the scan "
+                                    "or pentest, write the report, say plainly that nothing was fixed, and ask whether to fix what was found."})
+    return None
 
 
 class ProviderError(Exception):
@@ -156,10 +182,7 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
     is_task = not ctx.get("greeting")
     # A task that asks for a FIX (fix / remediate / patch / mitigate in this message, or a short "continue" / "yes" right after one) is not a plain scan:
     # the model writes its own closing message about what it fixed, and the report is not given the scan-only verdict section.
-    if _FIX_WORDS.search(str(last_user)):
-        ctx["fix_task"] = True
-    elif not re.fullmatch(r"\s*(continue|yes\b.*|ok\b.*|okay\b.*|go on|go ahead|proceed|do it|please do)[.! ]*", str(last_user), re.I):
-        ctx["fix_task"] = False
+    detect_fix_task(ctx, str(last_user))
     if is_task:
         ctx["task_t0"] = wall0
         started = get_current_datetime()
@@ -378,7 +401,12 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
                 is_repeat = seen_calls[sig] > 1
                 repeats += is_repeat
                 t1 = time.monotonic()
-                result = await run_tool(tc["name"], tc["arguments"], ctx)
+                refused = fix_gate(ctx, tc["name"], is_task)
+                if refused:
+                    turnlog.log("fix_gate_refused", sid=sid, turn=turn_id, tool=tc["name"])
+                    result = refused
+                else:
+                    result = await run_tool(tc["name"], tc["arguments"], ctx)
                 # Which Muse Spark billing tier is safe for this session's content -- FAIL-CLOSED (fixed 2026-10-27, a real gap found
                 # before this shipped anywhere else): contributor (10x cheaper, Meta CAN train on it) is only ever used once a target name
                 # is CONFIRMED public, never on the mere fact that redteam_clone_repo was called. Two real bugs this closes:
@@ -418,6 +446,8 @@ async def run_turn(provider: str, messages: list, ctx: dict, on_text, on_tool_ca
                         ctx["repo_visibility"] = "private"
                 if tc["name"] in _SCAN_TOOLS:
                     ctx["scan_done"] = True
+                    if not ctx.get("fix_task"):
+                        ctx["fix_offered"] = True
                     try:
                         turn_findings_total += json.loads(result).get("count") or 0
                     except (ValueError, TypeError, AttributeError):
