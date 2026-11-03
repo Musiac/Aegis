@@ -33,17 +33,18 @@ _lock = threading.Lock()
 _last_touch = 0.0
 
 
-def _sh(cmd: str) -> tuple[int, str]:
-    p = subprocess.run(cmd, shell=True, cwd=REPO_ROOT, capture_output=True, text=True, timeout=120)
+TRIO_NAMES = ("aegis-sandbox", "aegis-sandbox-proxy", "aegis-sandbox-web")
+
+
+def _run(argv: list[str]) -> tuple[int, str]:
+    # argv list, no shell: nothing here is ever parsed by a shell, so no string can be injected into a command.
+    p = subprocess.run(argv, cwd=REPO_ROOT, capture_output=True, text=True, timeout=120)
     return p.returncode, (p.stdout + p.stderr)
 
 
 def _trio_running() -> bool:
-    # -E (not plain -c with \|): subprocess's shell=True invokes /bin/sh, whose real (non-aliased) system grep
-    # does not treat \| as BRE alternation the way an interactive shell's grep alias might -- confirmed live,
-    # \| silently matched only 1 of the 3 names. -E with a plain | is portable across both.
-    rc, out = _sh("docker ps --format '{{.Names}}' | grep -cE '^aegis-sandbox$|^aegis-sandbox-proxy$|^aegis-sandbox-web$'")
-    return rc == 0 and out.strip() == "3"
+    rc, out = _run(["docker", "ps", "--format", "{{.Names}}"])
+    return rc == 0 and set(TRIO_NAMES) <= set(out.split())
 
 
 def touch() -> None:
@@ -56,7 +57,7 @@ def start_trio() -> dict:
     with _lock:
         if _trio_running():
             return {"ok": True, "already_running": True}
-        rc, out = _sh("bash trio_control/start_trio.sh")
+        rc, out = _run(["bash", "trio_control/start_trio.sh"])
         if rc != 0:
             return {"ok": False, "error": out[-4000:]}
         return {"ok": True, "already_running": False}
@@ -64,7 +65,7 @@ def start_trio() -> dict:
 
 def stop_trio() -> dict:
     with _lock:
-        rc, out = _sh("docker rm -f aegis-sandbox aegis-sandbox-proxy aegis-sandbox-web")
+        rc, out = _run(["docker", "rm", "-f", *TRIO_NAMES])
         return {"ok": rc == 0, "output": out[-2000:]}
 
 
@@ -78,7 +79,7 @@ def _reaper() -> None:
         with _lock:
             idle_for = time.monotonic() - _last_touch
             if idle_for >= IDLE_TIMEOUT_S and _trio_running():
-                rc, out = _sh("docker rm -f aegis-sandbox aegis-sandbox-proxy aegis-sandbox-web")
+                rc, out = _run(["docker", "rm", "-f", *TRIO_NAMES])
                 print(f"[trio_control] idle {idle_for:.0f}s >= {IDLE_TIMEOUT_S:.0f}s, reaped trio (rc={rc})", flush=True)
 
 
