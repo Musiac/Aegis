@@ -127,7 +127,7 @@ async def providers():
             "auto_route": {"scan": scan_provider, "fix": fix_provider} if scan_provider else None}
 
 
-# Markdown-syntax stripping ported from Jiina's own TTS cleaner (sentence_stream.py's clean_for_speech, Jiina repo,
+# Markdown-syntax stripping ported from Jiina's own TTS cleaner (Aegis is based on Jiina's single-agent loop pattern and architecture; sentence_stream.py's clean_for_speech, Jiina repo,
 # utils/common_setup/) -- same rules, same reason: reading the raw text aloud (asterisks, headers, link syntax) breaks
 # otherwise. Jiina's version does not strip emoji (her model rarely emits them), but Aegis's does ("green arrow...",
 # spoken checkmarks) -- added here, not there, since it's this build's own real symptom.

@@ -40,7 +40,7 @@ _CACHED_INPUT_RATE_PER_1M_USD = {
 # uses, see web.py's /ws/asr) and non-streaming/batch transcription.
 MUSE_VOICE_TRANSCRIBE_USD_PER_SECOND = 0.18 / 3600.0
 
-# gemini-3.8-flash-lite-tts's real rates, ported from Jiina's own verified model_pricing.json entry (Jiina repo,
+# gemini-3.8-flash-lite-tts's real rates, ported from Jiina's own verified model_pricing.json entry (Aegis is based on Jiina's single-agent loop pattern and architecture; Jiina repo,
 # utils/common_setup/model_pricing.json) -- https://ai.google.dev/gemini-api/docs/pricing, verified there 2026-10-26.
 # Switched 2026-10-28 from gemini-3.8-live ($3.00/1M audio input, $12.00/1M audio output -- the full-duplex Live API,
 # audio rates) to this dedicated one-shot TTS model, which is meaningfully cheaper for Aegis's actual use (text in,

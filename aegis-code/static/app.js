@@ -131,7 +131,7 @@
     if (speakerMuted) { window.speechSynthesis.cancel(); stopKokoroAudio(); }
   });
 
-  // Classifies each line the same way main Jiina's own terminal view distinguishes a tool call from its result
+  // Classifies each line the same way main Jiina's own terminal view (Aegis is based on Jiina's single-agent loop pattern and architecture) distinguishes a tool call from its result
   // (see Jiina/frontend/nextjs -- terminal-cmd/-out/-progress): web.py emits "-> name(args)" for a call,
   // "   <result>" (3-space indent) for its result, and "[name] text" for progress/status lines.
   function addTerminalLine(text) {

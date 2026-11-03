@@ -121,9 +121,9 @@ section {
   padding: 0 14px 14px;
   min-height: 0;
 }
-/* Matches the look & feel of main Jiina's own live terminal (Jiina/frontend/nextjs/public/static/styles.css
+/* Matches the look & feel of main Jiina's own live terminal (Aegis is based on Jiina's single-agent loop pattern and architecture; Jiina/frontend/nextjs/public/static/styles.css
    .terminal-log) -- a fixed-dark console card regardless of page theme, not themed via the --bg/--border vars
-   above, so it reads the same here as it does there. Ported identically to cyberJiina's static/style.css. */
+   above, so it reads the same here as it does there. */
 #terminal {
   background: #0d1013;
   border: 1px solid #2a2f35;
@@ -230,7 +230,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 /* The "she is working, not hung" indicator, shown in TWO places at once: a pill next to the Send button (quick
    at-a-glance "it's working" even before you look at the chat pane) and inline right next to "Aegis" in the
    live chat turn (the full-featured version's .turn-dots placement). Both ported from
-   the full-featured version's frontend styles.css. */
+   the full-featured version's frontend styles.css (Aegis is based on Jiina's single-agent loop pattern and architecture). */
 .msg.pending { color: var(--muted); }
 .task-dots { display: none; align-items: center; gap: 4px; flex: none; padding: 7px 10px; border-radius: 999px; background: rgba(128,128,128,0.14); color: var(--muted); }
 .task-dots.busy { display: inline-flex; }
