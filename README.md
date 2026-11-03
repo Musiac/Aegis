@@ -60,9 +60,16 @@ Docker Desktop is free for personal use and small businesses; larger companies n
 ```bash
 git clone https://github.com/Musiac/Aegis
 cd Aegis
-cp .env.example .env     # then, in this folder, open the file .env, find the line MUSE_API_KEY= , type your own Meta API key after it, and save the file
-bash install.sh          # builds and starts everything; it can take 5 to 10 minutes on a fast connection (see the note below). If an "Allow" pop-up appears, click Allow
+cp .env.example .env
 ```
+
+Now open the file `.env` in the **Aegis** folder, find the line `MUSE_API_KEY=`, type your own Meta API key right after it, and save the file. Then run:
+
+```bash
+bash install.sh
+```
+
+This builds and starts everything. It can take 5 to 10 minutes on a fast connection (see the note below). If an "Allow" pop-up appears, click Allow.
 
 How long the first install takes depends on your internet speed. On a new Windows laptop on home Wi-Fi it took **30 minutes**, and about 20 of those were the last step, which downloads the scanner tools and the vulnerability databases. On a Mac with a fast connection that step took under a minute. Later installs take under a minute because everything is cached.
 
