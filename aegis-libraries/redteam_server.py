@@ -163,10 +163,19 @@ def _image_target(name: str) -> str:
     return path
 
 
-def _run(cmd: list, cwd: str = None, timeout: int = _TIMEOUT_S) -> tuple:
+def _trivy_env() -> dict:
+    """Environment for every Trivy call (2026-11-03). Trivy's Java database is a ~950 MB download that it unpacks into the temp directory; here /tmp is a
+    2 GB in-memory filesystem that other tools share, so the download died with "no space left on device" and every container scan failed. Pointing TMPDIR
+    at the disk-backed cache volume avoids that (and keeps a big download out of RAM)."""
+    tmp = "/trivy-cache/tmp"
+    os.makedirs(tmp, exist_ok=True)
+    return {**os.environ, "TMPDIR": tmp}
+
+
+def _run(cmd: list, cwd: str = None, timeout: int = _TIMEOUT_S, env: dict = None) -> tuple:
     """(exit_code, stdout). Never raises on a non-zero exit (every one of these tools uses that to mean 'findings exist')."""
     try:
-        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
         return p.returncode, p.stdout or p.stderr
     except subprocess.TimeoutExpired:
         return -1, "(timed out)"
@@ -375,7 +384,7 @@ async def run_trivy(r: TargetReq):
     # wrapper's `timeout` kwarg below -- confirmed live: Aegis's own 627MB redteam image (a full JRE + Node +
     # several Python scanners' deps) hit trivy's own 5-minute internal "context deadline exceeded" well before
     # the subprocess's 1200s ever had a chance to fire. Set both explicitly so one real number governs the scan.
-    code, raw = _run(["trivy", "image", "--input", path, "--cache-dir", "/trivy-cache", "--timeout", "20m", "--format", "json", "--severity", "HIGH,CRITICAL", "--scanners", "vuln,secret"], timeout=1260)
+    code, raw = _run(["trivy", "image", "--input", path, "--cache-dir", "/trivy-cache", "--timeout", "20m", "--format", "json", "--severity", "HIGH,CRITICAL", "--scanners", "vuln,secret"], timeout=1260, env=_trivy_env())
     try:
         data = json.loads(raw)
     except Exception:
@@ -1055,9 +1064,16 @@ async def prepare_databases():
     other scanners keep nothing to pre-load: Semgrep rules, pip-audit and npm audit read their online sources on every run. Safe to repeat:
     when the database is already current this returns in a second or two."""
     t0 = time.monotonic()
-    code, raw = await asyncio.to_thread(_run, ["trivy", "image", "--download-db-only", "--cache-dir", "/trivy-cache", "--timeout", "20m", "--no-progress"], None, 1260)
+    env = _trivy_env()
+    code, raw = await asyncio.to_thread(_run, ["trivy", "image", "--download-db-only", "--cache-dir", "/trivy-cache", "--timeout", "20m", "--no-progress"], None, 1260, env)
     ok = code == 0
-    return {"ok": ok, "tool": "trivy", "what": "vulnerability database", "seconds": round(time.monotonic() - t0, 1), "detail": "" if ok else (raw or "")[-300:]}
+    detail = "" if ok else (raw or "")[-300:]
+    if ok:
+        # The Java database (about 950 MB) is needed the first time Trivy meets a .jar file, which Aegis's own scanner image has.
+        code2, raw2 = await asyncio.to_thread(_run, ["trivy", "image", "--download-java-db-only", "--cache-dir", "/trivy-cache", "--timeout", "20m", "--no-progress"], None, 1260, env)
+        ok = code2 == 0
+        detail = "" if ok else (raw2 or "")[-300:]
+    return {"ok": ok, "tool": "trivy", "what": "vulnerability databases", "seconds": round(time.monotonic() - t0, 1), "detail": detail}
 
 
 @app.post("/update_tools", dependencies=[Depends(_auth)])

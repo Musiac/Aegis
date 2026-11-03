@@ -35,14 +35,14 @@ async def _main() -> int:
     for t in tools:
         print(f"  {t.get('name')} {t.get('current')} ({t.get('status')})", flush=True)
     # The one scanner database that has to be on disk before the first container scan: download it now, while the installer is still showing progress.
-    print("Downloading the vulnerability database (about 130 MB, first time only)...", flush=True)
+    print("Downloading the vulnerability databases (about 1 GB in total, first time only)...", flush=True)
     try:
         db = await prepare_scanner_databases()
     except Exception as e:                                                      # noqa: BLE001 -- a failed pre-download only means the first scan downloads it instead
         print(f"  Could not pre-download it ({type(e).__name__}); Aegis will download it on the first container scan instead.", flush=True)
         return 0
     if db.get("ok"):
-        print(f"  Vulnerability database ready ({db.get('seconds')} s).", flush=True)
+        print(f"  Vulnerability databases ready ({db.get('seconds')} s).", flush=True)
     else:
         print(f"  Could not pre-download it ({db.get('error') or db.get('detail')}); Aegis will download it on the first container scan instead.", flush=True)
     return 0
