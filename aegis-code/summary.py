@@ -40,9 +40,10 @@ def zap_summary(z: dict, plain: bool = False) -> str:
     return "\n".join(lines)
 
 
-# Where the zip really is on the operator's machine. The sandbox writes it to /aegis_out, which is a bind mount of this folder on the host, so it
-# survives container restarts. The container cannot see the host path, so it is configured (AEGIS_OUT_HOST_DIR) with this default for the Mac install.
-OUT_HOST_DIR = "/Users/bhaweshsingh/GenAI/Aegis/aegis_out"
+# Where the zip really is on the operator's machine. The sandbox writes it to /aegis_out, which is a bind mount of the aegis_out folder next to install.sh,
+# so it survives container restarts. The container cannot see the host path, so install.sh passes it in as AEGIS_OUT_HOST_DIR. Without it
+# (for example a hand-started container) we say where the folder is relative to the install folder instead of showing a path that may not exist.
+OUT_HOST_DIR = "aegis_out (inside the Aegis folder you installed from)"
 
 
 def deliverables_block(ctx: dict) -> str:

@@ -210,6 +210,7 @@ start_code() {
   docker run -d --name aegis-code --network aegis-net -p 8900:8900 -v aegis-sock:/sock --env-file .env --restart unless-stopped \
     --add-host=host.docker.internal:host-gateway \
     -e AEGIS_REDTEAM_URL="http://aegis-libraries:7906" -e AEGIS_PENTESTLIVE_URL="http://aegis-libraries:7907" \
+    -e AEGIS_OUT_HOST_DIR="$(pwd)/aegis_out" \
     -e TRIO_CONTROL_HOST="host.docker.internal" -e TRIO_CONTROL_PORT="7929" -e TRIO_CONTROL_TOKEN="$TRIO_CONTROL_TOKEN" \
     aegis-code:latest web >/dev/null
 }
