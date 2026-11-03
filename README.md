@@ -10,14 +10,14 @@
 
 ## Overview
 
-In Greek mythology the aegis was the divine shield that turned any enemy who looked at it to stone. This Aegis does not wait for an attack: it finds the vulnerability first, fixes it in place, and proves the fix holds.
+In Greek mythology the **Aegis** was the divine shield that turned any enemy who looked at it to stone. This **Aegis** does not wait for an attack: it finds the vulnerability first, fixes it in place, and proves the fix holds.
 
-Think of Aegis as a guard dog that is also a locksmith. It scans your code and container images, actively tests the locks on a target you point it at, fixes the weak ones itself, then checks the door again. It does not stop at a report: it loops scan → fix → re-scan until the scan comes back clean. It is powered entirely by Meta's **Muse Spark** and **Muse Wonder** models.
+Think of **Aegis** as a guard dog that is also a locksmith. It scans your code and container images, actively tests the locks on a target you point it at, fixes the weak ones itself, then checks the door again. It does not stop at a report: it loops scan → fix → re-scan until the scan comes back clean. It is powered entirely by Meta's **Muse Spark** and **Muse Wonder** models.
 
 **Key capabilities**
 
 - **Scan:** gitleaks, Bandit, Semgrep, pip-audit, npm audit and Trivy, on your code or any GitHub repo you name.
-- **Attack:** a real OWASP ZAP pentest against a server Aegis stands up from the cloned repo.
+- **Attack:** a real OWASP ZAP pentest against a server **Aegis** stands up from the cloned repo.
 - **Fix and prove it:** writes real fixes in an isolated sandbox, re-scans, and reports before and after.
 - **Report:** a Word report and a zip of the fixed project.
 - **Watch it work:** a live terminal pane shows every command it runs.
@@ -51,13 +51,13 @@ More install options, the CLI, and a dozen more example prompts: [aegis_usage_de
 | `pentest <target>` | Active OWASP ZAP scan against a target you have stood up, or one live probe of a URL you explicitly consent to (typed `PENTESTLIVE`). |
 | `pentest <target> and fix it` | Attacks, writes a real fix, re-attacks to prove it is closed. |
 
-`<target>` is Aegis's own source (`self`) or any public GitHub repo you point it at (private repos work with a token).
+`<target>` is **Aegis**'s own source (`self`) or any public GitHub repo you point it at (private repos work with a token).
 
 ## Models
 
-Every model Aegis calls at runtime is a Meta model:
+Every model **Aegis** calls at runtime is a Meta model:
 
-- **`muse-spark-1.3`** drives every chat turn, tool decision and fix. On public repos Aegis automatically uses the cheaper contributor tier; on private repos and its own code it uses the standard tier, where your content is never used for training.
+- **`muse-spark-1.3`** drives every chat turn, tool decision and fix. On public repos **Aegis** automatically uses the cheaper contributor tier; on private repos and its own code it uses the standard tier, where your content is never used for training.
 - **`muse-wonder-1.0`** is the bigger model, one click away in the model dropdown, for jobs where Spark struggles.
 - **`muse-voice-transcribe-1.0`** turns push-to-talk speech into text.
 
@@ -65,7 +65,7 @@ Spoken replies use the browser's own built-in voice, which is an operating-syste
 
 ## Results
 
-We ran Aegis end to end on six real public repositories, from small to large. Five finished clean on the static scanners; the sixth had 3 findings the tool cannot fix, because that repository's own package pins conflict. Runs took about 1 to 20 minutes and cost $0.30 to $2.50.
+We ran **Aegis** end to end on six real public repositories, from small to large. Five finished clean on the static scanners; the sixth had 3 findings the tool cannot fix, because that repository's own package pins conflict. Runs took about 1 to 20 minutes and cost $0.30 to $2.50.
 
 On one repo with a very long findings list (`openai/openai-agents-python`), **Muse Spark** struggled and was stopped; its bigger brother **Muse Wonder** did the job.
 
@@ -73,9 +73,9 @@ In a head-to-head on the same repo, **Muse Spark** finished about 32% faster tha
 
 ## Where we stand
 
-We ran Aegis next to [Strix](https://github.com/usestrix/strix), the most-starred open-source AI pentesting tool on GitHub, on the same project, with the same AI model, on the same day. We ran it ourselves, so it is not an independent test. All the numbers and caveats are in [aegis_vs_strix.md](aegis_vs_strix.md).
+We ran **Aegis** next to [Strix](https://github.com/usestrix/strix), the most-starred open-source AI pentesting tool on GitHub, on the same project, with the same AI model, on the same day. We ran it ourselves, so it is not an independent test. All the numbers and caveats are in [aegis_vs_strix.md](aegis_vs_strix.md).
 
-| | Aegis | Strix |
+| | **Aegis** | Strix |
 |---|---|---|
 | Has a user interface | ✅ | ✅ |
 | Shows its work live | ✅ | ✅ |
@@ -98,13 +98,13 @@ We ran Aegis next to [Strix](https://github.com/usestrix/strix), the most-starre
 | Clones private repos from a token file | ✅ | 🟡 Uses your own git login |
 | Works in CI/CD such as GitHub Actions | ❌ | ✅ |
 
-On the same project, an Aegis run took 7 to 12 minutes and cost $1.11 to $2.47, and it fixed what it found. A Strix run took 20 to 31 minutes and cost $21 to $29, and it reported what it found, including logic bugs that Aegis's scanners missed. The two tools do different jobs, so this is not a ranking.
+On the same project, an **Aegis** run took 7 to 12 minutes and cost $1.11 to $2.47, and it fixed what it found. A Strix run took **20 to 31 minutes** and cost **$21 to $29**, and it reported what it found, including logic bugs that **Aegis**'s scanners missed. The two tools do different jobs, so this is not a ranking.
 
-If you like Aegis, a star on this repository is appreciated.
+If you like **Aegis**, a star on this repository is appreciated.
 
 ## Security
 
-Aegis attacks other people's code, so we treated its own security as a feature:
+**Aegis** attacks other people's code, so we treated its own security as a feature:
 
 - **We ran Aegis on itself.** It scans and fixes its own source, and the Strix pentester found 4 real bugs in it that static scanners miss. We fixed every one.
 - **We tried to break out of the sandbox ourselves** with six real attacks. Five were blocked or contained; the sixth found a real bug in our export step, now fixed.
@@ -116,9 +116,9 @@ Full record of the attacks and results: [aegis_security_details.md](aegis_securi
 
 ## Architecture
 
-Aegis runs as two permanent containers and a short-lived sandbox:
+**Aegis** runs as two permanent containers and a short-lived sandbox:
 
-- **`aegis-code`** holds the Aegis main code: the chat loop and the web UI.
+- **`aegis-code`** holds the **Aegis** main code: the chat loop and the web UI.
 - **`aegis-libraries`** holds the heavy scanner tools.
 - **A sandbox trio** is created on demand for fixes and pentests, and removed after 5 idle minutes.
 
@@ -134,12 +134,12 @@ The code and the libraries are separate so that a code change rebuilds only the 
 | [aegis_security_details.md](aegis_security_details.md) | The six sandbox attacks and results |
 | [aegis_guardrails_and_nudges.txt](aegis_guardrails_and_nudges.txt) | The guardrails that keep a task on track |
 | [test/test_results.md](test/test_results.md) | Test runs and the model benchmark |
-| [aegis_vs_strix.md](aegis_vs_strix.md) | Aegis and Strix side by side, with every number |
-| [aegis_background.md](aegis_background.md) | The Musiacs story and how Aegis relates to our other product |
+| [aegis_vs_strix.md](aegis_vs_strix.md) | **Aegis** and Strix side by side, with every number |
+| [aegis_background.md](aegis_background.md) | The Musiacs story and how **Aegis** relates to our other product |
 
 ## Built for the hackathon
 
-We're **Musiacs** — **Muse Maniacs** — at **IdeaNirvana**. Aegis is a new, separate project, in its own repository created on 27 October 2026, submitted by the sole founder and developer in the Startup track. Aegis's pattern and architecture were ported from Jiina, our closed-source single-agent product, whose skills cover other areas such as ERP, DB Intel and document understanding. The code for Aegis follows the same single-agent pattern and architecture, but we wrote Aegis for cybersecurity work, with the pentest, redteam, fixpentest and fixredteam skills, for this hackathon, which started on 26 October 2026. Jiina's code and history are not in this repository. The full story, including the six findings **Muse** reported on our live site before the hackathon, is in [aegis_background.md](aegis_background.md).
+We're **Musiacs** — **Muse Maniacs** — at **IdeaNirvana**. **Aegis** is a new, separate project, in its own repository created on 27 October 2026, submitted by the sole founder and developer in the Startup track. **Aegis**'s pattern and architecture were ported from Jiina, our closed-source single-agent product, whose skills cover other areas such as ERP, DB Intel and document understanding. The code for **Aegis** follows the same single-agent pattern and architecture, but we wrote **Aegis** for cybersecurity work, with the pentest, redteam, fixpentest and fixredteam skills, for this hackathon, which started on 26 October 2026. Jiina's code and history are not in this repository. The full story, including the six findings **Muse** reported on our live site before the hackathon, is in [aegis_background.md](aegis_background.md).
 
 ## License
 
