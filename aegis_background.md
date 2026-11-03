@@ -38,9 +38,8 @@ Aegis has four skills: `redteam`, `pentest`, `fixredteam` and `fixpentest`. We b
 
 IdeaNirvana LLC is an existing startup; this hackathon entry is submitted in the Startup track by its
 sole founder/developer. Our existing live product, [Jiina](https://ideanirvana.com/solutions/jiina), is
-a single-agent, live voice assistant with its own unrelated skills (document editing, SAP/ServiceNow/Jira
-workflows, reporting). **Jiina's code and git history are not part of this repository** and stay
-closed-source.
+a closed-source single-agent product whose skills cover other areas such as ERP, DB Intel and document
+understanding. **Jiina's code and git history are not part of this repository.**
 
 **Aegis is a new, separate, single-agent project**, in its own repository
 ([`Musiac/Aegis`](https://github.com/Musiac/Aegis), created **27 October 2026**) built specifically for

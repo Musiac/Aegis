@@ -84,7 +84,7 @@ def _reaper() -> None:
 
 
 # Which client IPs may even attempt a request, checked BEFORE the bearer token (2026-10-31, real incident
-# found deploying cyberJiina's identical trio_control to the DGX): on native Linux Docker (the DGX, EC2 --
+# found deploying this same trio_control design to the DGX): on native Linux Docker (the DGX, EC2 --
 # NOT Docker Desktop), `host.docker.internal` does not resolve at all without
 # `--add-host=host.docker.internal:host-gateway` on the calling container, and even once that's added it
 # resolves to the docker0 bridge gateway IP (172.17.0.1 by default), NOT 127.0.0.1 -- so a server bound to

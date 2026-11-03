@@ -37,7 +37,7 @@ TARGETS = {"self": _SELF_DIR} if os.path.isdir(_SELF_DIR) else {}
 def _image_targets() -> dict:
     """Any image tarball under /images/, by filename -- generalized 2026-10-27 from a fixed 4-name list so a
     dynamically-cloned repo's own built-and-saved image (same operator `docker build && docker save` pattern
-    install.sh already uses for cyberJiina's own 4 images) is scannable the moment its tar appears in the
+    install.sh already uses for Aegis's own 4 images) is scannable the moment its tar appears in the
     read-only /images mount, with no code change and no container restart -- same refresh-per-call pattern as
     _dynamic_targets() below."""
     if not os.path.isdir("/images"):

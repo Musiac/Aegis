@@ -122,8 +122,8 @@ bash trio_control/start_trio.sh
 # host.docker.internal on its own, so this flag is a harmless no-op there -- but on NATIVE Linux Docker (a
 # DGX, EC2, any plain Linux host), host.docker.internal does not resolve at all without it. Docker's own
 # documented way to make the SAME docker run command behave identically everywhere -- found live deploying
-# cyberJiina's identical trio_control design to the DGX (gaierror from check_sandbox_capacity's lazy-start);
-# ported the fix here too even though Aegis itself has no DGX deployment today.
+# this same trio_control design to a native Linux host, the DGX (gaierror from check_sandbox_capacity's lazy-start);
+# applied here too even though Aegis itself has no DGX deployment today.
 docker rm -f aegis-code >/dev/null 2>&1 || true
 docker run -d --name aegis-code --network aegis-net -p 8900:8900 -v aegis-sock:/sock --env-file .env --restart unless-stopped \
   --add-host=host.docker.internal:host-gateway \

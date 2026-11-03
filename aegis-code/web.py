@@ -66,7 +66,7 @@ _CSP_BASE = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src '
 async def security_headers(request: Request, call_next):
     """Adds X-Content-Type-Options, X-Frame-Options and Content-Security-Policy to every response.
     Fixes ZAP rules 10020 (clickjacking), 10021 (MIME sniffing) and 10038/10055 (CSP missing/wildcard) -- found
-    2026-10-28 pentesting a cloned copy of this same code via cyberJiina; this is the real fix, applied here."""
+    2026-10-28 pentesting a cloned copy of this same code; this is the real fix, applied here."""
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
