@@ -37,7 +37,7 @@ from .core import ProviderError, new_session, pick_provider, run_turn
 from .llm import available_providers, scan_fix_providers
 from .model_pricing import compute_asr_cost_usd, compute_gemini_tts_cost_usd
 from .tools import trio_client
-from .tools.redteam_tools import check_scanner_versions, cleanup_redteam_scratch
+from .tools.redteam_tools import check_scanner_versions, cleanup_redteam_scratch, wait_for_scanner_tools
 from .tools.sandbox_tools import cleanup_sandbox_scratch
 
 # muse-voice-transcribe-1.0's real cost isn't an LLM-token call, so it can't go through compute_cost_usd/session_cost_usd
@@ -856,8 +856,19 @@ async def _run_greeting(ws, messages, ctx, on_text, on_tool_call, _total_cost_us
     Send stays disabled for the WHOLE function (the caller doesn't re-enable it until "done" arrives after
     this returns), so the operator sees the real tool state before they can send anything, not just a static line."""
     await on_text("Hi, I am Aegis. How can I help you?")
+    # First-run patience (2026-11-03): the scanner container can still be starting, or installing its first tool updates, for several minutes on a
+    # brand-new install. Say so once in the chat, show progress in the terminal pane, and keep going -- the operator should never have to refresh.
+    said = {"n": 0}
+
+    async def _setup_say(text: str) -> None:
+        said["n"] += 1
+        if said["n"] == 1:
+            await on_text(text)
+        else:
+            await ws.send_text(json.dumps({"type": "terminal", "line": f"[setup] {text}"}))
+
     try:
-        result = await check_scanner_versions({}, ctx)
+        result = await wait_for_scanner_tools(ctx, say=_setup_say)
         await on_tool_call("check_scanner_versions", {}, result)
         announce = _format_auto_update_announcement(result)
         lines, _ = _format_scanner_versions(result)
@@ -870,7 +881,10 @@ async def _run_greeting(ws, messages, ctx, on_text, on_tool_call, _total_cost_us
         # as its own earlier turn, the same way it would if it had generated the text itself.
         messages.append({"role": "assistant", "content": report})
     except Exception as e:                                                       # noqa: BLE001 -- a bad scanner-version check must never block the session from opening
-        await ws.send_text(json.dumps({"type": "error", "text": f"Scanner version check failed: {type(e).__name__}: {e}"}))
+        await ws.send_text(json.dumps({"type": "terminal", "line": f"[setup] scanner check did not finish: {type(e).__name__}: {e}"}))
+        await on_text("I could not finish getting my scanner tools ready. Usually the scanner container is still starting, or this computer has no "
+                      "internet access for a moment. Please wait a minute and refresh this page. If it keeps happening, run `docker logs aegis-libraries` "
+                      "to see why.")
     # verify_sandbox_safety is deliberately NOT run automatically here anymore (2026-10-31, Phase 2 of the
     # sandbox-trio refactor): it talks to the sandbox over the exec socket, which would lazy-start the whole
     # ephemeral trio on every single connect -- defeating the point of making it ephemeral (the operator should

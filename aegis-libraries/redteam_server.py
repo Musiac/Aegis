@@ -22,6 +22,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 import uuid
 from urllib.parse import urlparse
 
@@ -1047,6 +1048,18 @@ class UpdateToolsReq(BaseModel):
     tools: list[str]
 
 
+@app.post("/prepare_databases", dependencies=[Depends(_auth)])
+async def prepare_databases():
+    """Download the scanners' persistent data once, up front (2026-11-03). Trivy keeps a vulnerability database (about 130 MB) in /trivy-cache, a
+    named volume that survives restarts; without this, the first container scan a new user runs has to download it first and looks stuck. The
+    other scanners keep nothing to pre-load: Semgrep rules, pip-audit and npm audit read their online sources on every run. Safe to repeat:
+    when the database is already current this returns in a second or two."""
+    t0 = time.monotonic()
+    code, raw = await asyncio.to_thread(_run, ["trivy", "image", "--download-db-only", "--cache-dir", "/trivy-cache", "--timeout", "20m", "--no-progress"], None, 1260)
+    ok = code == 0
+    return {"ok": ok, "tool": "trivy", "what": "vulnerability database", "seconds": round(time.monotonic() - t0, 1), "detail": "" if ok else (raw or "")[-300:]}
+
+
 @app.post("/update_tools", dependencies=[Depends(_auth)])
 async def update_tools(r: UpdateToolsReq):
     """Updates exactly the named tools, live, persisted to the host-mounted /tool_updates (see the module comment
@@ -1107,3 +1120,19 @@ async def scanner_versions():
             results.append(tool)
 
     return {"ok": True, "tools": results}
+
+
+_warmup_task = {"t": None}
+
+
+@app.on_event("startup")
+async def _warm_up_scanners():
+    """Warm the scanner CLIs in the background as the container starts (2026-11-03). On a brand-new install the first real version check used to
+    meet a cold container (semgrep and the others load slowly the first time) and could be slow enough to time out; running it once here, before
+    anyone asks, means the first real request finds everything already loaded. Failures are ignored: this is only a warm-up."""
+    async def _go():
+        try:
+            await scanner_versions()
+        except Exception:                                                    # noqa: BLE001 -- warm-up only
+            pass
+    _warmup_task["t"] = asyncio.create_task(_go())

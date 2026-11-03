@@ -2,9 +2,11 @@
 READ-ONLY copy of source. The tool here only forwards a named target and the tool name; it cannot send a path, a command or anything else
 the server would act on. Aegis is a single-operator tool (no accounts), so unlike a larger multi-account assistant there is no owner/admin role check here --
 the only gate is whether the server is actually configured (a token present)."""
+import asyncio
 import json
 import re
 import os
+import time
 from collections import Counter
 
 import httpx
@@ -458,7 +460,10 @@ async def check_scanner_versions(args: dict, ctx: dict) -> str:
     if why:
         return why
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as c:
+    # 120 s read timeout (was 15 s, 2026-11-03): on a first run, or on a slow machine, the scanner container is cold -- it is still
+    # starting up or loading its tools -- and the old 15 s limit surfaced as a raw "ReadTimeout" in the chat. wait_for_scanner_tools
+    # below retries around this call for the first-run case.
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as c:
         r = await c.get(f"{URL}/scanner_versions", headers={"Authorization": f"Bearer {TOKEN}"})
 
     if r.status_code != 200:
@@ -484,8 +489,10 @@ async def check_scanner_versions(args: dict, ctx: dict) -> str:
         )
         return json.dumps(before)
 
+    ctx["_scanner_update_started"] = True     # a timeout from here on means the update is probably still running: wait for it, do not start another
     update_result = await update_scanner_tools({"tools": before["outdated_tools"]}, ctx)
     after = json.loads(update_result)
+    ctx["_scanner_update_started"] = False
     after["before"] = before
     after["note"] = (
         f"Found {len(outdated)} outdated tool(s) ({before['outdated_tools']}) and updated them immediately, with "
@@ -498,6 +505,81 @@ async def check_scanner_versions(args: dict, ctx: dict) -> str:
         "outdated'. Never claim a tool updated cleanly if its own `attempted` entry says ok:false."
     )
     return json.dumps(after)
+
+
+class ScannerSetupTimeout(Exception):
+    """The scanner container did not become ready within the allowed time."""
+
+
+_RETRYABLE = (httpx.TimeoutException, httpx.TransportError)
+
+
+async def _outdated_count() -> int:
+    """GET-only look at how many scanner tools are still behind. Never starts an update."""
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as c:
+        r = await c.get(f"{URL}/scanner_versions", headers={"Authorization": f"Bearer {TOKEN}"})
+    if r.status_code != 200:
+        raise httpx.TransportError(f"HTTP {r.status_code}")
+    tools = r.json().get("tools", [])
+    return len([t for t in tools if t.get("status") not in ("latest", "system-managed")])
+
+
+async def wait_for_scanner_tools(ctx: dict, say=None, max_wait_s: float = 1500.0) -> str:
+    """check_scanner_versions, made patient (2026-11-03). On a first run the scanner container can still be starting, or busy installing
+    its first set of tool updates, for several minutes. This keeps trying, tells the operator once, in plain words, that the wait is
+    normal, and reports progress through `say(text)` every ~20 s so the page never looks hung. It never starts a second update while the
+    first is still running. Raises ScannerSetupTimeout only after max_wait_s (25 minutes)."""
+    started = time.monotonic()
+    last_tick = started
+    told = False
+
+    async def _say(text: str) -> None:
+        if say:
+            await say(text)
+
+    attempt = 0
+    watch_since = None
+    while True:
+        attempt += 1
+        try:
+            if ctx.get("_scanner_update_started"):
+                # An update is already running on the server: only watch it, never start another -- but if it has not finished after
+                # 10 minutes it most likely died, so allow one fresh attempt.
+                watch_since = watch_since or time.monotonic()
+                if await _outdated_count() == 0 or time.monotonic() - watch_since > 600:
+                    ctx["_scanner_update_started"] = False
+                    watch_since = None
+                    continue
+            else:
+                return await check_scanner_versions({}, ctx)
+        except _RETRYABLE:
+            pass
+        except json.JSONDecodeError:
+            pass
+        waited = time.monotonic() - started
+        if waited > max_wait_s:
+            raise ScannerSetupTimeout(f"scanner tools were not ready after {int(waited)} seconds")
+        if not told:
+            told = True
+            await _say("First-time setup: I am getting my scanner tools ready. This only happens the first time and can take several minutes. "
+                       "You do not need to refresh this page -- I will keep going and tell you when I am ready.")
+        if time.monotonic() - last_tick >= 20:
+            last_tick = time.monotonic()
+            await _say(f"Still preparing my scanner tools ({int(waited)} s so far)...")
+        await asyncio.sleep(min(3 + attempt * 2, 15))
+
+
+async def prepare_scanner_databases() -> dict:
+    """Asks the scanner container to download Trivy's vulnerability database now (see /prepare_databases there). Used by install-time first-run
+    setup so the first real container scan does not have to. Returns the server's JSON answer; never raises on an HTTP error status."""
+    why = _gate()
+    if why:
+        return json.loads(why)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(1300.0, connect=10.0)) as c:
+        r = await c.post(f"{URL}/prepare_databases", headers={"Authorization": f"Bearer {TOKEN}"})
+    if r.status_code != 200:
+        return {"ok": False, "error": f"HTTP {r.status_code}"}
+    return r.json()
 
 
 async def update_scanner_tools(args: dict, ctx: dict) -> str:

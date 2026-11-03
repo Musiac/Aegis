@@ -16,7 +16,63 @@
 set -e
 cd "$(dirname "$0")"
 ENV_FILE=".env"
-[ -f "$ENV_FILE" ] || { echo "Copy .env.example to .env and fill it in first."; exit 1; }
+[ -f "$ENV_FILE" ] || { echo "Copy .env.example to .env and fill it in first:  cp .env.example .env"; exit 1; }
+
+# --- friendly checks, so a first-time user gets a plain sentence instead of a stack of errors ---
+for cmd in docker python3 rsync curl; do
+  command -v "$cmd" >/dev/null 2>&1 || { echo "Aegis needs '$cmd' but it was not found. Please install it, then run this again."; exit 1; }
+done
+docker info >/dev/null 2>&1 || { echo "Docker is installed but not running. Please start Docker Desktop (or the Docker service), wait until it says it is running, then run this again."; exit 1; }
+grep -Eq '^MUSE_API_KEY=.+' "$ENV_FILE" || { echo "Your Meta API key is missing. Open the file .env in this folder, find the line MUSE_API_KEY= , type your own Meta API key right after the = sign, save the file, then run this again."; exit 1; }
+
+echo "Aegis install: this builds 3 images and starts the containers. It can take 5 to 10 minutes the first time."
+echo "If a pop-up asks to allow network access, click Allow. The progress line below keeps moving, so you can tell it is not stuck."
+echo
+
+# --- progress: a spinner, a step counter, a progress bar and a running clock for every long step ---
+TOTAL_STEPS=9
+STEP=0
+SPIN_SOFT=0     # 1 = a failing step prints a warning and the install carries on
+LAST_LOG=""
+_elapsed() { printf '%d:%02d' $(($1 / 60)) $(($1 % 60)); }
+_bar() { # _bar <done> <total>  ->  ####----------------
+  local n=$1 total=$2 w=20 i=0 f s=""
+  f=$(( n * w / total ))
+  while [ $i -lt $w ]; do if [ $i -lt $f ]; then s="${s}#"; else s="${s}-"; fi; i=$((i + 1)); done
+  printf '%s' "$s"
+}
+spin_run() { # spin_run "what is happening" command [args...]
+  local label="$1"; shift
+  STEP=$((STEP + 1))
+  local log start pid rc frame=0 frames='|/-\'
+  log=$(mktemp -t aegis_install.XXXXXX); LAST_LOG="$log"; start=$SECONDS
+  "$@" >"$log" 2>&1 &
+  pid=$!
+  if [ -t 1 ]; then
+    while kill -0 "$pid" 2>/dev/null; do
+      printf '\r\033[K[%d/%d] [%s] %s %s  %s' "$STEP" "$TOTAL_STEPS" "$(_bar $((STEP - 1)) $TOTAL_STEPS)" "${frames:$((frame % 4)):1}" "$label" "$(_elapsed $((SECONDS - start)))"
+      frame=$((frame + 1)); sleep 0.2
+    done
+  else
+    echo "[$STEP/$TOTAL_STEPS] $label ..."
+    local beat=$SECONDS
+    while kill -0 "$pid" 2>/dev/null; do
+      sleep 1
+      if [ $((SECONDS - beat)) -ge 20 ]; then beat=$SECONDS; echo "    still working, $(_elapsed $((SECONDS - start))) so far -- this is normal, it is not stuck"; fi
+    done
+  fi
+  if wait "$pid"; then rc=0; else rc=$?; fi
+  [ -t 1 ] && printf '\r\033[K'
+  if [ $rc -eq 0 ]; then
+    printf '[%d/%d] [%s] done: %s (%s)\n' "$STEP" "$TOTAL_STEPS" "$(_bar $STEP $TOTAL_STEPS)" "$label" "$(_elapsed $((SECONDS - start)))"
+  else
+    printf '[%d/%d] FAILED: %s\n' "$STEP" "$TOTAL_STEPS" "$label"
+    echo "---- last lines of its output ----"; tail -n 40 "$log"; echo "----------------------------------"
+    if [ "$SPIN_SOFT" = "1" ]; then return 0; fi
+    echo "The install stopped. Fix the problem above and run: bash install.sh   (it is safe to run again)"
+    exit $rc
+  fi
+}
 
 mkdir -p src/self self_target aegis_out dynamic_pristine dynamic_target redteam_tool_updates
 # Self-scan target: Aegis scanning its OWN source, the same way. It moves through the same
@@ -43,13 +99,16 @@ rsync -a --delete --exclude ".git" --exclude ".env" --exclude "__pycache__" --ex
 # updates there, see aegis-libraries/redteam_server.py's own "Live, same-session tool update" section). Every other mount of
 # these dirs is read-only. It runs BEFORE redteam starts: aegis-libraries/redteam_server.py only registers "self" if
 # /src_self/self already exists then.
-docker build -q -t aegis-sandbox:latest ./sandbox | tail -1
-docker run --rm --user 0 --network none --entrypoint sh \
-  -v "$(pwd)/src/self:/self_pristine:ro" -v "$(pwd)/self_target:/self_target" -v "$(pwd)/aegis_out:/aegis_out" \
-  -v "$(pwd)/dynamic_pristine:/dynamic_pristine" -v "$(pwd)/dynamic_target:/dynamic_target" \
-  -v "$(pwd)/redteam_tool_updates:/redteam_tool_updates" \
-  aegis-sandbox:latest -c 'rm -rf /self_target/self && cp -a /self_pristine /self_target/self &&
-    chown -R 1001:1001 /self_target /dynamic_target /aegis_out && chown -R 1000:1000 /dynamic_pristine /redteam_tool_updates'
+spin_run "Building the sandbox image" docker build -q -t aegis-sandbox:latest ./sandbox
+seed_self_copy() {
+  docker run --rm --user 0 --network none --entrypoint sh \
+    -v "$(pwd)/src/self:/self_pristine:ro" -v "$(pwd)/self_target:/self_target" -v "$(pwd)/aegis_out:/aegis_out" \
+    -v "$(pwd)/dynamic_pristine:/dynamic_pristine" -v "$(pwd)/dynamic_target:/dynamic_target" \
+    -v "$(pwd)/redteam_tool_updates:/redteam_tool_updates" \
+    aegis-sandbox:latest -c 'rm -rf /self_target/self && cp -a /self_pristine /self_target/self &&
+      chown -R 1001:1001 /self_target /dynamic_target /aegis_out && chown -R 1000:1000 /dynamic_pristine /redteam_tool_updates'
+}
+spin_run "Preparing the folders Aegis works in" seed_self_copy
 
 # --- aegis-libraries: static scanners + ZAP + pentestlive, folded into one image/container (2026-10-31).
 # On Linux this ran as --network host; Docker Desktop (Mac/Windows) does not route --network host to
@@ -57,31 +116,37 @@ docker run --rm --user 0 --network none --entrypoint sh \
 # the other containers reached by container name, not 127.0.0.1 -- see AEGIS_REDTEAM_URL/AEGIS_PENTESTLIVE_URL
 # below (both now point at the SAME container, aegis-libraries, on its 2 ports).
 docker network inspect aegis-net >/dev/null 2>&1 || docker network create aegis-net >/dev/null
-docker build -q -t aegis-libraries:latest ./aegis-libraries | tail -1
+spin_run "Building the scanner image (the slowest step)" docker build -q -t aegis-libraries:latest ./aegis-libraries
 
 # Build the other image now (normally built further below, sandbox is already built above) so
 # redteam_trivy has something real to scan -- a plain `docker save` tarball of each of Aegis's own
 # images, mounted read-only at /images/<name>.tar. This never touches the Docker socket or a registry:
 # a deploy-time snapshot, same as the full-featured version's Trivy design.
-docker build -q -t aegis-code:latest ./aegis-code | tail -1
+spin_run "Building the Aegis app image" docker build -q -t aegis-code:latest ./aegis-code
 mkdir -p images
-docker save aegis-libraries:latest -o images/libraries.tar
-docker save aegis-sandbox:latest -o images/sandbox.tar
-docker save aegis-code:latest -o images/code.tar
+save_images() {
+  docker save aegis-libraries:latest -o images/libraries.tar
+  docker save aegis-sandbox:latest -o images/sandbox.tar
+  docker save aegis-code:latest -o images/code.tar
+}
+spin_run "Saving image copies for the container scan" save_images
 
 grep -q '^REDTEAM_TOKEN=' "$ENV_FILE" || echo "REDTEAM_TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" >> "$ENV_FILE"
 REDTEAM_TOKEN=$(grep '^REDTEAM_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
 GITHUB_CLONE_TOKEN=$(grep '^GITHUB_CLONE_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
 grep -q '^PENTESTLIVE_TOKEN=' "$ENV_FILE" || echo "PENTESTLIVE_TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" >> "$ENV_FILE"
 PENTESTLIVE_TOKEN=$(grep '^PENTESTLIVE_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
-docker rm -f aegis-libraries >/dev/null 2>&1 || true
-docker volume create aegis-libraries-trivy-cache >/dev/null
-docker run -d --name aegis-libraries --network aegis-net --read-only --tmpfs /tmp:size=2g,exec --restart unless-stopped \
-  -v "$(pwd)/self_target:/src_self:ro" -v "$(pwd)/dynamic_pristine:/dynamic_pristine_rw" -v "$(pwd)/dynamic_target:/src_dynamic:ro" \
-  -v "$(pwd)/images:/images:ro" -v aegis-libraries-trivy-cache:/trivy-cache \
-  -v "$(pwd)/redteam_tool_updates:/tool_updates" \
-  -e REDTEAM_TOKEN="$REDTEAM_TOKEN" -e GITHUB_CLONE_TOKEN="$GITHUB_CLONE_TOKEN" -e PENTESTLIVE_TOKEN="$PENTESTLIVE_TOKEN" \
-  -p 127.0.0.1:7907:7907 aegis-libraries:latest >/dev/null
+start_libraries() {
+  docker rm -f aegis-libraries >/dev/null 2>&1 || true
+  docker volume create aegis-libraries-trivy-cache >/dev/null
+  docker run -d --name aegis-libraries --network aegis-net --read-only --tmpfs /tmp:size=2g,exec --restart unless-stopped \
+    -v "$(pwd)/self_target:/src_self:ro" -v "$(pwd)/dynamic_pristine:/dynamic_pristine_rw" -v "$(pwd)/dynamic_target:/src_dynamic:ro" \
+    -v "$(pwd)/images:/images:ro" -v aegis-libraries-trivy-cache:/trivy-cache \
+    -v "$(pwd)/redteam_tool_updates:/tool_updates" \
+    -e REDTEAM_TOKEN="$REDTEAM_TOKEN" -e GITHUB_CLONE_TOKEN="$GITHUB_CLONE_TOKEN" -e PENTESTLIVE_TOKEN="$PENTESTLIVE_TOKEN" \
+    -p 127.0.0.1:7907:7907 aegis-libraries:latest >/dev/null
+}
+spin_run "Starting the scanner container (aegis-libraries)" start_libraries
 
 # --- sandbox trio: ephemeral (2026-10-31). aegis-sandbox + aegis-sandbox-proxy + aegis-sandbox-web are no
 # longer created here directly -- trio_control/start_trio.sh is the one real place those `docker run` commands
@@ -104,7 +169,7 @@ if ! curl -s -o /dev/null "http://127.0.0.1:7929/status"; then
   disown
   for i in $(seq 1 20); do curl -s -o /dev/null "http://127.0.0.1:7929/status" && break; sleep 0.5; done
 fi
-bash trio_control/start_trio.sh
+spin_run "Starting the sandbox" bash trio_control/start_trio.sh
 
 # NOTE on kokoro/: a local Kokoro-82M TTS container (kokoro/Dockerfile, backend's /api/tts_kokoro) was built
 # 2026-10-29, then NOT wired in here the same day -- Meta's hackathon organizers ruled it out ("Every model
@@ -124,19 +189,34 @@ bash trio_control/start_trio.sh
 # documented way to make the SAME docker run command behave identically everywhere -- found live deploying
 # this same trio_control design to a native Linux host, the DGX (gaierror from check_sandbox_capacity's lazy-start);
 # applied here too even though Aegis itself has no DGX deployment today.
-docker rm -f aegis-code >/dev/null 2>&1 || true
-docker run -d --name aegis-code --network aegis-net -p 8900:8900 -v aegis-sock:/sock --env-file .env --restart unless-stopped \
-  --add-host=host.docker.internal:host-gateway \
-  -e AEGIS_REDTEAM_URL="http://aegis-libraries:7906" -e AEGIS_PENTESTLIVE_URL="http://aegis-libraries:7907" \
-  -e TRIO_CONTROL_HOST="host.docker.internal" -e TRIO_CONTROL_PORT="7929" -e TRIO_CONTROL_TOKEN="$TRIO_CONTROL_TOKEN" \
-  aegis-code:latest web >/dev/null
+start_code() {
+  docker rm -f aegis-code >/dev/null 2>&1 || true
+  docker run -d --name aegis-code --network aegis-net -p 8900:8900 -v aegis-sock:/sock --env-file .env --restart unless-stopped \
+    --add-host=host.docker.internal:host-gateway \
+    -e AEGIS_REDTEAM_URL="http://aegis-libraries:7906" -e AEGIS_PENTESTLIVE_URL="http://aegis-libraries:7907" \
+    -e TRIO_CONTROL_HOST="host.docker.internal" -e TRIO_CONTROL_PORT="7929" -e TRIO_CONTROL_TOKEN="$TRIO_CONTROL_TOKEN" \
+    aegis-code:latest web >/dev/null
+}
+spin_run "Starting the Aegis web app (aegis-code)" start_code
 
-sleep 3
-echo "--- aegis-libraries (redteam) ---";   docker exec aegis-libraries curl -s http://127.0.0.1:7906/health; echo
-echo "--- aegis-libraries (pentestlive) ---"; curl -s http://127.0.0.1:7907/health; echo
-echo "--- aegis-code web ---";  curl -s http://127.0.0.1:8900/api/providers; echo
+# First-run setup (2026-11-03): the scanner tools load and bring themselves up to date the first time. Doing it here, with the progress line
+# above still moving, means the page is ready the moment you open it. A failure here is only a warning: the page keeps trying by itself.
+SPIN_SOFT=1
+spin_run "Getting the scanner tools ready (first time only, can take several minutes)" docker exec aegis-code python3 -m backend.first_run
+SPIN_SOFT=0
+cat "$LAST_LOG"
+
+echo
+echo "--- checks ---"
+echo "aegis-libraries (scanners): $(docker exec aegis-libraries curl -s http://127.0.0.1:7906/health)"
+echo "aegis-libraries (live-site probe): $(curl -s http://127.0.0.1:7907/health)"
+echo "aegis-code (web): $(curl -s http://127.0.0.1:8900/api/providers)"
+echo
 docker ps --format '{{.Names}}\t{{.Status}}' | grep aegis
 echo
+echo "In Docker you will now see two permanent containers, aegis-code and aegis-libraries."
+echo "A short-lived sandbox (aegis-sandbox, aegis-sandbox-proxy, aegis-sandbox-web) starts when Aegis needs it and is removed after 5 idle minutes."
+echo
 echo "All set."
-echo "Web UI:  http://127.0.0.1:8900"
+echo "Web UI:  http://127.0.0.1:8900   (open it in your browser)"
 echo "CLI:     docker run -it --rm --network aegis-net -v aegis-sock:/sock --env-file .env aegis-code:latest"
