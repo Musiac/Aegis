@@ -1,7 +1,7 @@
 <p align="center"><img src="docs/assets/aegis-shield-arrow.png" alt="Aegis shield deflecting an incoming arrow" width="220"></p>
 <p align="center"><img src="docs/assets/aegis-hackathon-badge.jpg" alt="Meta Global AI Developer Hackathon — 10 days on Meta's newest AI models, $1M in cash prizes" width="520"></p>
 
-<h1 align="center">Aegis</h1>
+<h1 align="center">**Aegis**</h1>
 
 <p align="center"><b>The AI security agent that finds the weakness, fixes it, and proves the fix holds.</b><br>
 <b>A</b>gentic <b>E</b>nterprise <b>G</b>uard for <b>I</b>nfo<b>S</b>ec — by <b>Musiac</b> (<b>Mus</b>e <b>I</b>ntelligence for <b>A</b>dvanced <b>C</b>yberSec), built for the <a href="https://dev.meta.ai/events/global-hackathon">Meta Global Hackathon</a></p>
@@ -25,16 +25,43 @@ Think of **Aegis** as a guard dog that is also a locksmith. It scans your code a
 
 ## Quick start
 
-You need Docker, a bash shell (Linux, macOS, or WSL2), `rsync`, `python3`, and a **Muse** API key.
+You need Docker (running), a bash shell (Linux, macOS, or WSL2), `rsync`, `python3`, `curl`, and a **Muse** API key.
+
+<details>
+<summary><b>New computer? How to install Docker (and WSL 2 on Windows)</b></summary>
+
+**Mac**
+1. Find your chip: Apple menu, then *About This Mac* (it says Apple silicon or Intel).
+2. Download **Docker Desktop for Mac** from [docs.docker.com/desktop/setup/install/mac-install](https://docs.docker.com/desktop/setup/install/mac-install/), choosing the Apple silicon or Intel version.
+3. Open the downloaded file, drag Docker into *Applications*, open it, and accept the terms.
+4. Wait until Docker Desktop says it is running (a whale icon in the menu bar). Leave it running while you install **Aegis**.
+5. On a brand-new Mac, the first `git` or `python3` command may offer to install the *command line developer tools*. Click *Install* and wait for it to finish.
+
+**Windows** (**Aegis** runs inside WSL 2, a Linux that comes with Windows 10 version 2004 or later, and Windows 11)
+1. Install WSL 2: open the Start menu, type *PowerShell*, right-click it, choose *Run as administrator*, and run `wsl --install`. Restart the computer when it asks. When Ubuntu opens, it asks you to create a username and password. Details: [learn.microsoft.com/windows/wsl/install](https://learn.microsoft.com/en-us/windows/wsl/install).
+2. Download and run **Docker Desktop for Windows** from [docs.docker.com/desktop/setup/install/windows-install](https://docs.docker.com/desktop/setup/install/windows-install/). Keep the *WSL 2* option selected when the installer asks.
+3. Open Docker Desktop, accept the terms, and wait until it says it is running. Then open *Settings*, *Resources*, *WSL integration*, and switch it on for *Ubuntu*.
+4. Open **Ubuntu** from the Start menu. This is the bash shell the steps below use. Run `sudo apt update && sudo apt install -y git rsync python3 curl` once, then do the install steps below inside Ubuntu, in your home folder.
+
+**Linux**: install Docker Engine from [docs.docker.com/engine/install](https://docs.docker.com/engine/install/).
+
+Docker Desktop is free for personal use and small businesses; larger companies need a paid plan (see Docker's terms).
+</details>
 
 ```bash
 git clone https://github.com/Musiac/Aegis
 cd Aegis
-cp .env.example .env     # put your MUSE_API_KEY in it
-bash install.sh          # builds and starts everything
+cp .env.example .env     # then, in this folder, open the file .env, find the line MUSE_API_KEY= , type your own Meta API key after it, and save the file
+bash install.sh          # builds and starts everything; it can take 5 to 10 minutes. If an "Allow" pop-up appears, click Allow
 ```
 
-Then open **http://127.0.0.1:8900** and type a request. Try one of these:
+While it installs, a progress line with a spinner and a running clock shows that it has not hung. When it finishes, open Docker and you will see two new containers, `aegis-code` and `aegis-libraries`. (A short-lived sandbox of three more containers starts when **Aegis** needs it and is removed after 5 idle minutes.)
+
+Then open **http://127.0.0.1:8900** in your browser. A terminal opens in the left half of your screen and a chat window in the right half. The very first time only, **Aegis** spends a few minutes getting its scanner tools and their databases ready (the install does most of this for you). When the chat shows the version number of every scanner tool, it is ready: type your request in the chat box at the bottom right.
+
+**Which model?** The page starts on **Muse Spark Contributor**, the least costly Meta model. Use it for public repositories only, never for private ones. **Muse Wonder** is Meta's most capable model but also the most costly, so for a medium or large repository choose Wonder from the drop-down at the top of the page.
+
+Try one of these requests:
 
 - `scan https://github.com/usestrix/strix and report what you find, but do not fix anything.`
 - `scan self and fix any issue you find.`

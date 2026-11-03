@@ -4,14 +4,18 @@ Everything beyond the quick start. Back to the [README](README.md).
 
 ## Install (full)
 
-**You'll need:** Docker, a bash shell (Linux, macOS, or WSL2 on Windows), plus `rsync` and `python3`.
+**You'll need:** Docker (running), a bash shell (Linux, macOS, or WSL2 on Windows), plus `rsync`, `python3` and `curl`.
 
 ```
 git clone https://github.com/Musiac/Aegis
 cd Aegis
-cp .env.example .env            # fill in MUSE_API_KEY
-bash install.sh                 # builds + starts aegis-code + aegis-libraries + a running sandbox trio; generates REDTEAM_TOKEN/PENTESTLIVE_TOKEN/TRIO_CONTROL_TOKEN into .env itself
+cp .env.example .env            # then, in this folder, open the file .env, find the line MUSE_API_KEY= , type your own Meta API key after it, and save the file
+bash install.sh                 # builds + starts aegis-code + aegis-libraries + a running sandbox trio; generates REDTEAM_TOKEN/PENTESTLIVE_TOKEN/TRIO_CONTROL_TOKEN into .env itself; can take 5 to 10 minutes. If an "Allow" pop-up appears, click Allow
 ```
+
+`install.sh` shows a spinner, a step counter (`[3/9]`), a progress bar and a running clock for every long step, so you can tell it has not hung. If a step fails it stops and prints the last lines of that step's output; it is safe to run again. Its last step waits for the scanner tools to finish their first-time setup, which is the slowest part of a first install. When it finishes, Docker shows two permanent containers, `aegis-code` and `aegis-libraries`, plus the short-lived sandbox (`aegis-sandbox`, `aegis-sandbox-proxy`, `aegis-sandbox-web`) that is removed after 5 idle minutes.
+
+**The first time you open the page**, a terminal opens in the left half and the chat in the right half. If the scanner tools are still getting ready, the chat says so and keeps going by itself; you do not need to refresh. When it lists the version number of every scanner tool, it is ready: type your request in the chat box at the bottom right. The page starts on **Muse Spark Contributor**, the least costly model: use it for public repositories only, never private ones. **Muse Wonder** is Meta's most capable model but also the most costly, so choose it from the drop-down for a medium or large repository.
 
 The `install.sh` is a plain bash script, not a `docker compose` file — the
 containers have deliberately different network modes, and the script is simpler to read end to end
