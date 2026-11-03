@@ -44,7 +44,7 @@ closed-source.
 
 **Aegis is a new, separate, single-agent project**, in its own repository
 ([`Musiac/Aegis`](https://github.com/Musiac/Aegis), created **27 October 2026**) built specifically for
-this hackathon. Its agent loop (`core.py`) grew out of code first written in our closed-source projects Jiina and cyberJiina, so parts of it resemble them; this repository's git history contains none of theirs. New for this hackathon: the whole
+this hackathon. Aegis's pattern and architecture were ported from Jiina, our closed-source single-agent product, whose skills cover other areas such as ERP, DB Intel and document understanding. The code for Aegis follows the same single-agent pattern and architecture, but we wrote Aegis for cybersecurity work, with the pentest, redteam, fixpentest and fixredteam skills, for this hackathon, which started on 26 October 2026. Jiina's code and history are not in this repository. New for this hackathon: the whole
 security-agent persona and skill set (`redteam`/`fixredteam`/`pentest`/`fixpentest`), the sandboxed
 clone → scan → fix → re-verify pipeline, the live OWASP ZAP active-pentest integration, **Muse Spark** as
 the driving model (with the larger **Muse Wonder** for harder jobs) and the public/private billing safety switch (see [test/test_results.md](test/test_results.md)), push-to-talk voice
