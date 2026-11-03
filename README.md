@@ -45,7 +45,7 @@ You need Docker (running), a bash shell (Linux, macOS, or WSL2), `rsync`, `pytho
 
 **Windows** (**Aegis** runs inside WSL 2, a Linux that comes with Windows 10 version 2004 or later, and Windows 11)
 1. Install WSL 2: open the Start menu, type *PowerShell*, right-click it, choose *Run as administrator*, and run `wsl --install`. Restart the computer when it asks. When Ubuntu opens, it asks you to create a username and password. Details: [learn.microsoft.com/windows/wsl/install](https://learn.microsoft.com/en-us/windows/wsl/install).
-2. Download and run **Docker Desktop for Windows** from [docs.docker.com/desktop/setup/install/windows-install](https://docs.docker.com/desktop/setup/install/windows-install/). Keep the *WSL 2* option selected when the installer asks.
+2. Download and run **Docker Desktop for Windows** from [docs.docker.com/desktop/setup/install/windows-install](https://docs.docker.com/desktop/setup/install/windows-install/). Keep the *WSL 2* option selected when the installer asks. If your PC has an Arm processor (for example a Snapdragon or NVIDIA RTX Spark laptop; *Settings*, *System*, *About* says "ARM-based processor"), choose the **Arm** download on that page; Docker marks it as Early Access.
 3. Open Docker Desktop, accept the terms, and wait until it says it is running. Then open *Settings*, *Resources*, *WSL integration*, and switch it on for *Ubuntu*.
 4. Open **Ubuntu** from the Start menu. This is the bash shell the steps below use. Run `sudo apt update && sudo apt install -y git rsync python3 curl` once, then do the install steps below inside Ubuntu, in your home folder.
 
