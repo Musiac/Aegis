@@ -25,12 +25,21 @@ done
 docker info >/dev/null 2>&1 || { echo "Docker is installed but not running. Please start Docker Desktop (or the Docker service), wait until it says it is running, then run this again."; exit 1; }
 grep -Eq '^MUSE_API_KEY=.+' "$ENV_FILE" || { echo "Your Meta API key is missing. Open the file .env in this folder, find the line MUSE_API_KEY= , type your own Meta API key right after the = sign, save the file, then run this again."; exit 1; }
 
+# --- is there room? Warnings only: the install carries on, but a slow or failing run is easier to understand if you were told first (2026-11-03). ---
+MIN_DISK_GB="${AEGIS_MIN_DISK_GB:-25}"; MIN_RAM_GB="${AEGIS_MIN_DOCKER_RAM_GB:-4}"; MIN_CPUS="${AEGIS_MIN_CPUS:-4}"
+FREE_DISK_GB=$(df -Pk . 2>/dev/null | awk 'NR==2 {printf "%d", $4 / 1048576}')
+DOCKER_CPUS=$(docker info --format '{{.NCPU}}' 2>/dev/null)
+DOCKER_RAM_GB=$(docker info --format '{{.MemTotal}}' 2>/dev/null | awk '{printf "%d", $1 / 1073741824}')
+[ -n "$FREE_DISK_GB" ] && [ "$FREE_DISK_GB" -lt "$MIN_DISK_GB" ] && echo "WARNING: only ${FREE_DISK_GB} GB of disk is free here. Aegis needs about ${MIN_DISK_GB} GB free (about 12 GB once installed, about 17 GB during the first install)."
+[ -n "$DOCKER_RAM_GB" ] && [ "$DOCKER_RAM_GB" -lt "$MIN_RAM_GB" ] && echo "WARNING: Docker can use only ${DOCKER_RAM_GB} GB of memory. Aegis works best with at least ${MIN_RAM_GB} GB free for Docker (it peaked at about 2 GB in our tests). In Docker Desktop: Settings, Resources."
+[ -n "$DOCKER_CPUS" ] && [ "$DOCKER_CPUS" -lt "$MIN_CPUS" ] && echo "WARNING: Docker can use only ${DOCKER_CPUS} processor cores. Aegis works best with at least ${MIN_CPUS}; scans will just take longer."
+
 echo "Aegis install: this builds 3 images and starts the containers. It can take 5 to 10 minutes the first time."
 echo "If a pop-up asks to allow network access, click Allow. The progress line below keeps moving, so you can tell it is not stuck."
 echo
 
 # --- progress: a spinner, a step counter, a progress bar and a running clock for every long step ---
-TOTAL_STEPS=9
+TOTAL_STEPS=10
 STEP=0
 SPIN_SOFT=0     # 1 = a failing step prints a warning and the install carries on
 LAST_LOG=""
@@ -164,8 +173,15 @@ docker volume create aegis-sock >/dev/null; docker volume create aegis-work >/de
 grep -q '^TRIO_CONTROL_TOKEN=' "$ENV_FILE" || echo "TRIO_CONTROL_TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" >> "$ENV_FILE"
 TRIO_CONTROL_TOKEN=$(grep '^TRIO_CONTROL_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
 mkdir -p logs
+TRIO_EXTRA="$(grep '^TRIO_CONTROL_EXTRA_ALLOWED=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)"
+# Our own previous controller (recorded in logs/trio_control.pid) is restarted so a changed setting takes effect. It is found by its saved PID,
+# never by name, so another program's controller on the same machine is never touched.
+if [ -f logs/trio_control.pid ] && kill -0 "$(cat logs/trio_control.pid)" 2>/dev/null; then
+  kill "$(cat logs/trio_control.pid)" 2>/dev/null || true; sleep 1
+fi
 if ! curl -s -o /dev/null "http://127.0.0.1:7929/status"; then
-  TRIO_CONTROL_TOKEN="$TRIO_CONTROL_TOKEN" AEGIS_REPO_ROOT="$(pwd)" nohup python3 trio_control/server.py >> logs/trio_control.log 2>&1 &
+  TRIO_CONTROL_TOKEN="$TRIO_CONTROL_TOKEN" TRIO_CONTROL_EXTRA_ALLOWED="$TRIO_EXTRA" AEGIS_REPO_ROOT="$(pwd)" nohup python3 trio_control/server.py >> logs/trio_control.log 2>&1 &
+  echo $! > logs/trio_control.pid
   disown
   for i in $(seq 1 20); do curl -s -o /dev/null "http://127.0.0.1:7929/status" && break; sleep 0.5; done
 fi
@@ -198,6 +214,33 @@ start_code() {
     aegis-code:latest web >/dev/null
 }
 spin_run "Starting the Aegis web app (aegis-code)" start_code
+
+# Can the Aegis container actually reach the sandbox controller that runs on this computer? (2026-11-03) It does on Mac and Linux. On Windows with
+# WSL 2 the connection can arrive from a different address, and the first task that needs the sandbox would fail with no explanation, so check now.
+check_sandbox_link() {
+  docker exec aegis-code python3 -c "
+import os, sys, urllib.request, urllib.error
+url = 'http://%s:%s/status' % (os.environ['TRIO_CONTROL_HOST'], os.environ['TRIO_CONTROL_PORT'])
+try:
+    r = urllib.request.urlopen(url, timeout=8)
+    print('Aegis can reach its sandbox controller.')
+except urllib.error.HTTPError as e:
+    print('The sandbox controller refused the connection (HTTP %s).' % e.code); sys.exit(1)
+except Exception as e:
+    print('Aegis cannot reach its sandbox controller (%s).' % type(e).__name__); sys.exit(1)
+"
+}
+SPIN_SOFT=1
+spin_run "Checking that Aegis can reach its sandbox" check_sandbox_link
+SPIN_SOFT=0
+if ! grep -q "can reach its sandbox" "$LAST_LOG"; then
+  cat "$LAST_LOG"
+  echo "Tasks that need the sandbox (fixing code, starting a server) will fail until this is fixed. What to try:"
+  echo "  - If it says 'refused': open logs/trio_control.log, find the line 'refused a request from <address>', add the line"
+  echo "    TRIO_CONTROL_EXTRA_ALLOWED=<address>/32 to your .env file, and run: bash install.sh"
+  echo "  - If it says 'cannot reach': make sure Docker Desktop is running, and (on Windows) that you are running this inside Ubuntu, not PowerShell."
+  echo
+fi
 
 # First-run setup (2026-11-03): the scanner tools load and bring themselves up to date the first time. Doing it here, with the progress line
 # above still moving, means the page is ready the moment you open it. A failure here is only a warning: the page keeps trying by itself.

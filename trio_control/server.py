@@ -95,6 +95,15 @@ def _reaper() -> None:
 # code gets the container reachability Linux needs without that widening: only loopback and the default
 # Docker bridge subnet are ever allowed in, regardless of which interface actually received the connection.
 _ALLOWED_CLIENT_NETS = [ipaddress.ip_network("127.0.0.0/8"), ipaddress.ip_network("172.16.0.0/12")]
+# Some Docker setups (Docker Desktop on Windows with WSL 2 is the one to watch) may reach this process from a different address. install.sh checks
+# the connection and, if it is refused, tells the user which address to add here: TRIO_CONTROL_EXTRA_ALLOWED=<address>/32 in .env (comma-separated
+# list allowed). Nothing is widened unless the user adds it.
+for _extra in (os.environ.get("TRIO_CONTROL_EXTRA_ALLOWED") or "").split(","):
+    if _extra.strip():
+        try:
+            _ALLOWED_CLIENT_NETS.append(ipaddress.ip_network(_extra.strip(), strict=False))
+        except ValueError:
+            print(f"[trio_control] ignoring invalid TRIO_CONTROL_EXTRA_ALLOWED entry {_extra.strip()!r}", flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -111,7 +120,10 @@ class Handler(BaseHTTPRequestHandler):
             ip = ipaddress.ip_address(self.client_address[0])
         except ValueError:
             return False
-        return any(ip in net for net in _ALLOWED_CLIENT_NETS)
+        if any(ip in net for net in _ALLOWED_CLIENT_NETS):
+            return True
+        print(f"[trio_control] refused a request from {ip} (not in the allowed networks)", flush=True)
+        return False
 
     def _authed(self) -> bool:
         return self.headers.get("Authorization") == f"Bearer {TOKEN}"
