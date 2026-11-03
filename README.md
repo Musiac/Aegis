@@ -48,6 +48,9 @@ You need Docker (running), a bash shell (Linux, macOS, or WSL2), `rsync`, `pytho
 2. Download and run **Docker Desktop for Windows** from [docs.docker.com/desktop/setup/install/windows-install](https://docs.docker.com/desktop/setup/install/windows-install/). Keep the *WSL 2* option selected when the installer asks. If your PC has an Arm processor (for example a Snapdragon or NVIDIA RTX Spark laptop; *Settings*, *System*, *About* says "ARM-based processor"), choose the **Arm** download on that page; Docker marks it as Early Access.
 3. Open Docker Desktop, accept the terms, and wait until it says it is running. Then open *Settings*, *Resources*, *WSL integration*, and switch it on for *Ubuntu*.
 4. Open **Ubuntu** from the Start menu. This is the bash shell the steps below use. Run `sudo apt update && sudo apt install -y git rsync python3 curl` once, then do the install steps below inside Ubuntu, in your home folder.
+5. Keep the Ubuntu window open, and keep the PC awake (plugged in, with sleep set to "never" while on power), until the install finishes. In our test, Windows shut Ubuntu down while no window was open, and sleep did the same; either one stops the install part-way. Running `bash install.sh` again is safe and carries on from the cached steps.
+
+*What we tested:* a new Windows 11 PC with an Arm processor, Ubuntu in WSL 2, and Docker Engine installed inside Ubuntu (not Docker Desktop). We have not tested the Docker Desktop route above ourselves.
 
 **Linux**: install Docker Engine from [docs.docker.com/engine/install](https://docs.docker.com/engine/install/).
 
@@ -58,10 +61,14 @@ Docker Desktop is free for personal use and small businesses; larger companies n
 git clone https://github.com/Musiac/Aegis
 cd Aegis
 cp .env.example .env     # then, in this folder, open the file .env, find the line MUSE_API_KEY= , type your own Meta API key after it, and save the file
-bash install.sh          # builds and starts everything; it can take 5 to 10 minutes (longer on slow internet). If an "Allow" pop-up appears, click Allow
+bash install.sh          # builds and starts everything; it can take 5 to 10 minutes on a fast connection (see the note below). If an "Allow" pop-up appears, click Allow
 ```
 
+How long the first install takes depends on your internet speed. On a new Windows laptop on home Wi-Fi it took **30 minutes**, and about 20 of those were the last step, which downloads the scanner tools and the vulnerability databases. On a Mac with a fast connection that step took under a minute. Later installs take under a minute because everything is cached.
+
 While it installs, a progress line with a spinner and a running clock shows that it has not hung. When it finishes, open Docker and you will see two new containers, `aegis-code` and `aegis-libraries`. (A short-lived sandbox of three more containers starts when **Aegis** needs it and is removed after 5 idle minutes.)
+
+**Where the fixed code goes:** the zip of the fixed project (it also contains the Word report) is saved in the `aegis_out` folder inside the **Aegis** folder you installed from, and the chat tells you the full path. On Windows that folder is inside Ubuntu; in File Explorer, type `\\wsl$` in the address bar and open Ubuntu, `home`, your user name, `Aegis`, `aegis_out`.
 
 Then open **http://127.0.0.1:8900** in your browser. A terminal opens in the left half of your screen and a chat window in the right half. The very first time only, **Aegis** spends a few minutes getting its scanner tools and their databases ready (the install does most of this for you). When the chat shows the version number of every scanner tool, it is ready: type your request in the chat box at the bottom right.
 
