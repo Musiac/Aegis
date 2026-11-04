@@ -102,6 +102,8 @@ More install options, the CLI, and a dozen more example prompts: [aegis_usage_de
 
 `<target>` is **Aegis**'s own source (`self`, a fresh clone of its public repository) or any public GitHub repo you point it at (private repos work with a token).
 
+**Known limit:** when the target is `self`, **Aegis** runs the static scanners, fixes what they find and re-scans to confirm, but it does not yet start its own server for the live OWASP ZAP attack. For any other repo it does, as long as the repo has a server it can start. Adding the live attack for `self` is planned for the next update.
+
 ## Models
 
 Every model **Aegis** calls at runtime is a Meta model:
