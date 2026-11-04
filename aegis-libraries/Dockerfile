@@ -12,24 +12,30 @@
 # Both processes run on aegis-net (a bridge network with real egress) -- neither one ever needed --network
 # host; see install.sh's own note on why aegis-net was chosen over host networking on Docker Desktop.
 FROM python:3.12-slim
+# Slow or unreliable internet (2026-11-04): a timed-out download used to stop the whole build (a 15-second pip read timeout failed a real install on a weak
+# Wi-Fi link). pip now waits up to 100 s per read and retries 10 times, apt retries 5 times, and the downloads below retry too.
+ENV PIP_DEFAULT_TIMEOUT=100 PIP_RETRIES=10
+RUN mkdir -p /etc/apt/apt.conf.d && echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git nodejs npm openjdk-21-jre-headless unzip \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir fastapi "uvicorn[standard]" httpx bandit==1.9.4 semgrep==1.170.0 pip-audit==2.10.1
 # gitleaks: a single static binary, no runtime deps
 RUN set -e; ARCH=$(dpkg --print-architecture); case "$ARCH" in arm64) GLARCH=arm64;; amd64) GLARCH=x64;; *) echo "unsupported arch $ARCH"; exit 1;; esac; \
-    curl -sL "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_${GLARCH}.tar.gz" | tar -xz -C /usr/local/bin gitleaks \
+    curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_${GLARCH}.tar.gz" \
+    && tar -xzf /tmp/gitleaks.tgz -C /usr/local/bin gitleaks && rm -f /tmp/gitleaks.tgz \
     && chmod +x /usr/local/bin/gitleaks
 # trivy: scans a LOCAL image tarball only (docker save'd outside this container by a deploy step) -- never the Docker socket, never a registry pull, so this tool needs no new privilege at all.
 RUN set -e; ARCH=$(dpkg --print-architecture); case "$ARCH" in arm64) TRIVYARCH=ARM64;; amd64) TRIVYARCH=64bit;; *) echo "unsupported arch $ARCH"; exit 1;; esac; \
-    curl -sL "https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-${TRIVYARCH}.tar.gz" | tar -xz -C /usr/local/bin trivy \
+    curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/trivy.tgz "https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-${TRIVYARCH}.tar.gz" \
+    && tar -xzf /tmp/trivy.tgz -C /usr/local/bin trivy && rm -f /tmp/trivy.tgz \
     && chmod +x /usr/local/bin/trivy
 # OWASP ZAP (spider + passive + active/attacking scan, see redteam_server.py's _zap_target_ok): official distribution, Java-based.
-RUN curl -sL https://github.com/zaproxy/zaproxy/releases/download/v2.17.0/ZAP_2.17.0_Linux.tar.gz -o /tmp/zap.tar.gz \
+RUN curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors https://github.com/zaproxy/zaproxy/releases/download/v2.17.0/ZAP_2.17.0_Linux.tar.gz -o /tmp/zap.tar.gz \
     && mkdir -p /opt/zap && tar -xzf /tmp/zap.tar.gz -C /opt/zap --strip-components=1 && rm /tmp/zap.tar.gz
 # ProjectDiscovery's httpx (a probe/recon tool -- a different thing from the Python httpx LIBRARY installed above): installed under its own name, pd-httpx, so there is never any
 # ambiguity between the two in this image's PATH or in pentestlive_server.py's subprocess calls.
 RUN set -e; ARCH=$(dpkg --print-architecture); case "$ARCH" in arm64) A=arm64;; amd64) A=amd64;; *) echo "unsupported arch $ARCH"; exit 1;; esac; \
-    curl -sL "https://github.com/projectdiscovery/httpx/releases/download/v1.12.0/httpx_1.12.0_linux_${A}.zip" -o /tmp/httpx.zip \
+    curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors "https://github.com/projectdiscovery/httpx/releases/download/v1.12.0/httpx_1.12.0_linux_${A}.zip" -o /tmp/httpx.zip \
     && unzip -q /tmp/httpx.zip -d /tmp/httpx_extract && mv /tmp/httpx_extract/httpx /usr/local/bin/pd-httpx && chmod +x /usr/local/bin/pd-httpx && rm -rf /tmp/httpx.zip /tmp/httpx_extract
 WORKDIR /app
 COPY redteam_server.py pentestlive_server.py entrypoint.sh /app/

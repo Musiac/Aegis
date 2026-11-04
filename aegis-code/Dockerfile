@@ -7,6 +7,10 @@
 #   web -- the browser UI, a real daemon on :8900:
 #     docker run -d --name aegis-code --network aegis-net -v aegis-sock:/sock --env-file .env --restart unless-stopped aegis-code:latest web
 FROM python:3.12-slim
+# Slow or unreliable internet (2026-11-04): a timed-out download used to stop the whole build (a 15-second pip read timeout failed a real install on a weak
+# Wi-Fi link). pip now waits up to 100 s per read and retries 10 times, apt retries 5 times, and the downloads below retry too.
+ENV PIP_DEFAULT_TIMEOUT=100 PIP_RETRIES=10
+RUN mkdir -p /etc/apt/apt.conf.d && echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
 # nodejs/npm (added 2026-10-30): this image is ALSO reused, unmodified, as sandbox-web's own runtime (sandbox_web/control.py's
 # _install_deps) to install a cloned project's own npm dependencies before starting an npm/React/etc. UI, the same way it already
 # installs Python deps via pip -- harmless addition to the real aegis-code container too, just unused binaries there.

@@ -7,6 +7,10 @@
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 UV_LINK_MODE=copy
+# Slow or unreliable internet (2026-11-04): a timed-out download used to stop the whole build (a 15-second pip read timeout failed a real install on a weak
+# Wi-Fi link). pip now waits up to 100 s per read and retries 10 times, apt retries 5 times, and the downloads below retry too.
+ENV PIP_DEFAULT_TIMEOUT=100 PIP_RETRIES=10
+RUN mkdir -p /etc/apt/apt.conf.d && echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
 RUN apt-get update && apt-get install -y --no-install-recommends bash coreutils findutils grep sed gawk curl jq git ca-certificates procps tini zip unzip libseccomp2 \
     && rm -rf /var/lib/apt/lists/*
 # nodejs/npm: so a fixredteam npm-audit fix can actually run `npm install <pkg>@<fix_version>` / `npm audit fix` and be verified for real,
@@ -15,7 +19,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends bash coreutils 
 # NodeSource's setup script instead, pinned to Node 24.x, the current Active LTS line as of 2026-10-26 (nodejs/release's own schedule;
 # 26.x becomes Active LTS 2026-10-28). This curl runs at BUILD time only, on the host building the image -- it has nothing to do with the
 # sandbox's own runtime network isolation (--network none) or the install-only egress proxy's allowlist below.
-RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+RUN curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/nodesource_setup.sh https://deb.nodesource.com/setup_24.x \
+    && bash /tmp/nodesource_setup.sh && rm -f /tmp/nodesource_setup.sh \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* \
     && pip install uv \
