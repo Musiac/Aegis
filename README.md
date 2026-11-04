@@ -100,13 +100,13 @@ More install options, the CLI, and a dozen more example prompts: [aegis_usage_de
 | `pentest <target>` | Active OWASP ZAP scan against a target you have stood up, or one live probe of a URL you explicitly consent to (typed `PENTESTLIVE`). |
 | `pentest <target> and fix it` | Attacks, writes a real fix, re-attacks to prove it is closed. |
 
-`<target>` is **Aegis**'s own source (`self`) or any public GitHub repo you point it at (private repos work with a token).
+`<target>` is **Aegis**'s own source (`self`, a fresh clone of its public repository) or any public GitHub repo you point it at (private repos work with a token).
 
 ## Models
 
 Every model **Aegis** calls at runtime is a Meta model:
 
-- **`muse-spark-1.3`** drives every chat turn, tool decision and fix. On public repos **Aegis** automatically uses the cheaper contributor tier; on private repos and its own code it uses the standard tier, where your content is never used for training.
+- **`muse-spark-1.3`** drives every chat turn, tool decision and fix. On public repos, including **Aegis**'s own public source (`self`), it automatically uses the cheaper contributor tier, and public code may be used for Meta's training. On private repos it uses the standard tier, where your content is never used for training.
 - **`muse-wonder-1.0`** is the bigger model, one click away in the model dropdown, for jobs where Spark struggles.
 - **`muse-voice-transcribe-1.0`** turns push-to-talk speech into text.
 

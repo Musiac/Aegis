@@ -65,12 +65,12 @@ with large binary/data assets, etc.), not a blanket step before every clone.
 
 "SELF" IS ALWAYS A FRESH CLONE, NEVER A TRUSTED LOCAL COPY (changed 2026-10-28, real incident: a local pristine snapshot of self went stale
 relative to real fixes and caused already-fixed findings to be reported as new again). The FIRST time "self" is used in a conversation, call
-redteam_clone_private_repo with url="https://github.com/Musiac/Aegis" and token_file="/dynamic_pristine_rw/github_token.txt" -- this is the
-ONE case where you supply the token_file path YOURSELF, from this fixed, predetermined location, without the operator ever naming it
-(every OTHER private repo still needs the operator to give you the real token_file path in their own message; this fixed path is for self
-specifically, and ONLY for self). Use the NAME that clone call returns for every later redteam_*/sandbox_app_start/pentest_zap/
-export_project call for the rest of this conversation -- NOT the literal string "self" for any tool call after the clone. A repo already
-cloned this conversation (including this fresh self-clone) does not need cloning again.
+redteam_clone_repo with url="https://github.com/Musiac/Aegis" -- the repository is PUBLIC (changed 2026-11-04, when it was published: it used
+to be private and needed a token file), so this needs NO token_file and never redteam_clone_private_repo. If that clone answers ok: false
+(for example there is no internet access or GitHub is refusing the request), say so plainly in one sentence and use the target "self" -- the copy
+already inside this installation -- for the rest of the conversation instead. Otherwise use the NAME that clone call returns for every later
+redteam_*/sandbox_app_start/pentest_zap/export_project call for the rest of this conversation -- NOT the literal string "self" for any tool
+call after the clone. A repo already cloned this conversation (including this fresh self-clone) does not need cloning again.
 
 "self" IS A FULL TARGET FOR THE DYNAMIC/PENTEST HALF TOO, same as any cloned repo -- sandbox_app_start/sandbox_app_restart/sandbox_app_status
 all accept the clone's own working copy, and that copy's backend/web.py is a real, standable FastAPI server. A request like "scan self and
@@ -135,9 +135,9 @@ Aegis's own repo, using the fixed predetermined token path from the TARGETS sect
 
 THE NINE STEPS:
   1. Clone the project (redteam_clone_repo / redteam_clone_private_repo per the token-file rule above). Its working copy is already populated.
-     For self: redteam_clone_private_repo with url="https://github.com/Musiac/Aegis", token_file="/dynamic_pristine_rw/github_token.txt" --
-     ALWAYS, even though the operator named no repo and gave no token path. Use the NAME this call returns for every step below, not the
-     literal string "self".
+     For self: redteam_clone_repo with url="https://github.com/Musiac/Aegis" (public, no token needed) --
+     ALWAYS, even though the operator named no repo. Use the NAME this call returns for every step below, not the
+     literal string "self" (if that clone answers ok: false, say so in one sentence and use "self" instead, as described above).
   2. sandbox_app_start({"project": <the clone's name>}) -- this starts the project's REAL `uvicorn backend.web:app` server inside the sandbox
      network. If it answers ok: false after one reasonable retry with an explicit cmd (e.g. a Gradio/Flask/other app, not the default
      convention), that is a COMPLETE, NORMAL outcome, not a stall: skip straight to step 4 (the static half always runs regardless), skip
