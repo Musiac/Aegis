@@ -18,7 +18,7 @@ Think of **Aegis** as a guard dog that is also a locksmith. It scans your code a
 
 **Key capabilities**
 
-- **Scan:** gitleaks, Bandit, Semgrep, pip-audit, npm audit and Trivy, on your code or any GitHub repo you name.
+- **Scan:** **gitleaks**, **Bandit**, **Semgrep**, **pip-audit**, **npm audit** and **Trivy**, on your code or any GitHub repo you name.
 - **Attack:** a real OWASP ZAP pentest against a server **Aegis** stands up from the cloned repo.
 - **Fix and prove it:** writes real fixes in an isolated sandbox, re-scans, and reports before and after.
 - **Report:** a Word report and a zip of the fixed project.
