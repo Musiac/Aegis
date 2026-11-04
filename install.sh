@@ -43,12 +43,19 @@ TOTAL_STEPS=10
 STEP=0
 SPIN_SOFT=0     # 1 = a failing step prints a warning and the install carries on
 LAST_LOG=""
+NOW_SHOWN=""
 _elapsed() { printf '%d:%02d' $(($1 / 60)) $(($1 % 60)); }
 _bar() { # _bar <done> <total>  ->  ####----------------
   local n=$1 total=$2 w=20 i=0 f s=""
   f=$(( n * w / total ))
   while [ $i -lt $w ]; do if [ $i -lt $f ]; then s="${s}#"; else s="${s}-"; fi; i=$((i + 1)); done
   printf '%s' "$s"
+}
+_now() { # a short "what it is doing right now", taken from the step's own output
+  local l
+  l=$(grep -E '^#[0-9]+ \[|^Step [0-9]+/' "$1" 2>/dev/null | tail -n 1)
+  [ -z "$l" ] && l=$(grep -v '^[[:space:]]*$' "$1" 2>/dev/null | tail -n 1)
+  printf '%s' "$l" | tr -d '\r' | sed -E 's/^#[0-9]+ //' | cut -c1-70
 }
 spin_run() { # spin_run "what is happening" command [args...]
   local label="$1"; shift
@@ -59,7 +66,12 @@ spin_run() { # spin_run "what is happening" command [args...]
   pid=$!
   if [ -t 1 ]; then
     while kill -0 "$pid" 2>/dev/null; do
-      printf '\r\033[K[%d/%d] [%s] %s %s  %s' "$STEP" "$TOTAL_STEPS" "$(_bar $((STEP - 1)) $TOTAL_STEPS)" "${frames:$((frame % 4)):1}" "$label" "$(_elapsed $((SECONDS - start)))"
+      local cols line now=""
+      cols=$(tput cols 2>/dev/null || echo 100)
+      if [ $((frame % 10)) -eq 0 ]; then now=$(_now "$log"); NOW_SHOWN="$now"; else now="$NOW_SHOWN"; fi
+      line=$(printf '[%d/%d] [%s] %s %s  %s' "$STEP" "$TOTAL_STEPS" "$(_bar $((STEP - 1)) $TOTAL_STEPS)" "${frames:$((frame % 4)):1}" "$label" "$(_elapsed $((SECONDS - start)))")
+      [ -n "$now" ] && line="$line  | $now"
+      printf '\r\033[K%s' "$(printf '%s' "$line" | cut -c1-$((cols - 1)))"
       frame=$((frame + 1)); sleep 0.2
     done
   else
@@ -67,7 +79,7 @@ spin_run() { # spin_run "what is happening" command [args...]
     local beat=$SECONDS
     while kill -0 "$pid" 2>/dev/null; do
       sleep 1
-      if [ $((SECONDS - beat)) -ge 20 ]; then beat=$SECONDS; echo "    still working, $(_elapsed $((SECONDS - start))) so far -- this is normal, it is not stuck"; fi
+      if [ $((SECONDS - beat)) -ge 20 ]; then beat=$SECONDS; echo "    still working, $(_elapsed $((SECONDS - start))) so far -- this is normal, it is not stuck. Now: $(_now "$log")"; fi
     done
   fi
   if wait "$pid"; then rc=0; else rc=$?; fi
@@ -108,7 +120,7 @@ rsync -a --delete --exclude ".git" --exclude ".env" --exclude "__pycache__" --ex
 # updates there, see aegis-libraries/redteam_server.py's own "Live, same-session tool update" section). Every other mount of
 # these dirs is read-only. It runs BEFORE redteam starts: aegis-libraries/redteam_server.py only registers "self" if
 # /src_self/self already exists then.
-spin_run "Building the sandbox image" docker build -q -t aegis-sandbox:latest ./sandbox
+spin_run "Building the sandbox image" docker build --progress=plain -t aegis-sandbox:latest ./sandbox
 seed_self_copy() {
   docker run --rm --user 0 --network none --entrypoint sh \
     -v "$(pwd)/src/self:/self_pristine:ro" -v "$(pwd)/self_target:/self_target" -v "$(pwd)/aegis_out:/aegis_out" \
@@ -125,13 +137,13 @@ spin_run "Preparing the folders Aegis works in" seed_self_copy
 # the other containers reached by container name, not 127.0.0.1 -- see AEGIS_REDTEAM_URL/AEGIS_PENTESTLIVE_URL
 # below (both now point at the SAME container, aegis-libraries, on its 2 ports).
 docker network inspect aegis-net >/dev/null 2>&1 || docker network create aegis-net >/dev/null
-spin_run "Building the scanner image (the slowest step)" docker build -q -t aegis-libraries:latest ./aegis-libraries
+spin_run "Building the scanner image (the slowest step)" docker build --progress=plain -t aegis-libraries:latest ./aegis-libraries
 
 # Build the other image now (normally built further below, sandbox is already built above) so
 # redteam_trivy has something real to scan -- a plain `docker save` tarball of each of Aegis's own
 # images, mounted read-only at /images/<name>.tar. This never touches the Docker socket or a registry:
 # a deploy-time snapshot, same as the full-featured version's Trivy design.
-spin_run "Building the Aegis app image" docker build -q -t aegis-code:latest ./aegis-code
+spin_run "Building the Aegis app image" docker build --progress=plain -t aegis-code:latest ./aegis-code
 mkdir -p images
 save_images() {
   docker save aegis-libraries:latest -o images/libraries.tar
