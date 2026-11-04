@@ -6,6 +6,8 @@
 <p align="center"><b>The AI security agent that finds the weakness, fixes it, and proves the fix holds.</b><br>
 <b>A</b>gentic <b>E</b>nterprise <b>G</b>uard for <b>I</b>nfo<b>S</b>ec — by <b>Musiac</b> (<b>Mus</b>e <b>I</b>ntelligence for <b>A</b>dvanced <b>C</b>yberSec), built for the <a href="https://dev.meta.ai/events/global-hackathon">Meta Global Hackathon</a></p>
 
+<p align="center"><b>Watch the 3-minute demo of <b>Aegis</b>:</b> <a href="https://ideanirvana.sharepoint.com/:v:/g/IQAni_tht9iYQIzv13nULSSdAZrF2nXHbckMhlBxdKDw1IA?e=NyQUzi">demo video</a></p>
+
 ---
 
 ## Overview
@@ -71,7 +73,7 @@ bash install.sh
 
 This builds and starts everything. It can take 5 to 10 minutes on a fast connection (see the note below). If an "Allow" pop-up appears, click Allow.
 
-How long the first install takes depends on your internet speed. On a new Windows laptop on home Wi-Fi it took **30 minutes**, and about 20 of those were the last step, which downloads the scanner tools and the vulnerability databases. On a Mac with a fast connection that step took under a minute. Later installs take under a minute because everything is cached.
+How long the first install takes depends on your internet speed. On a new Windows laptop with a good connection it took **about 9 minutes 30 seconds** (the slowest steps were the scanner image at 4 minutes and the scanner tools and vulnerability databases at 3 minutes). The same laptop took **30 minutes**, and once stopped on a download time-out, when its Wi-Fi was losing a quarter of its packets; if your install is slow or a download times out, try a cable connection, or turn off the Wi-Fi card's power saving, then run `bash install.sh` again. On a Mac with a fast connection the last step took under a minute. Later installs take under a minute because everything is cached.
 
 While it installs, a progress line with a spinner and a running clock shows that it has not hung. When it finishes, open Docker and you will see two new containers, `aegis-code` and `aegis-libraries`. (A short-lived sandbox of three more containers starts when **Aegis** needs it and is removed after 5 idle minutes.)
 
