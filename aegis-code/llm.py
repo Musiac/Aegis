@@ -320,19 +320,49 @@ async def _chat_once(provider: str, messages: list, tool_schemas: list, model_ov
 
 
 _CONNECT_RETRY_WAITS = (2.0, 5.0)    # seconds before the 2nd and 3rd attempt
+# A temporary server-side error (2026-11-04): in a real run Meta's gateway answered one request with HTTP 502 and an error web page, and the whole task ended with
+# the page's HTML dumped into the chat. 429 (too many requests) and 500/502/503/504 are the "try again in a moment" answers. The request is only the model call
+# (Aegis runs tools itself, after the reply arrives), so repeating it cannot run anything twice.
+_TRANSIENT_HTTP = (429, 500, 502, 503, 504)
+_HTTP_RETRY_WAITS = (2.0, 5.0, 12.0)  # seconds before the 2nd, 3rd and 4th attempt
+_HTTP_STATUS_RE = re.compile(r"answered HTTP (\d{3})")
+
+
+def _transient_http_status(err: Exception):
+    """The status code in an "<provider> answered HTTP <code>: ..." error when it is one of the temporary ones, else None."""
+    m = _HTTP_STATUS_RE.search(str(err))
+    return int(m.group(1)) if m and int(m.group(1)) in _TRANSIENT_HTTP else None
 
 
 async def chat(provider: str, messages: list, tool_schemas: list, model_override: str = "", effort_override: str = "") -> tuple:
-    """_chat_once, retried when the connection to the model server could not be OPENED (connect timeout / refused / DNS). Nothing was sent in
-    that case, so repeating it is safe and cannot double-run anything. A real 2026-10-26 run lost its final answer to one 10 s connect
-    timeout on the relay after the scan and report were already done; a read timeout or an HTTP error is NOT retried. model_override/
-    effort_override -- see _call_muse's docstring -- are only meaningful for provider="muse"; every other provider ignores them."""
-    for attempt, wait in enumerate((*_CONNECT_RETRY_WAITS, None), start=1):
+    """_chat_once, retried when the connection to the model server could not be OPENED (connect timeout / refused / DNS), or when the server answers with a
+    temporary error (HTTP 429/500/502/503/504). Nothing runs on our side before the reply, so repeating the call is safe and cannot double-run anything. A real
+    2026-10-26 run lost its final answer to one 10 s connect timeout on the relay after the scan and report were already done; a read timeout or any other
+    HTTP error (a bad key, a bad request) is NOT retried. model_override/effort_override -- see _call_muse's docstring -- are only meaningful for
+    provider="muse"; every other provider ignores them."""
+    connect_tries = http_tries = 0
+    while True:
         try:
             return await _chat_once(provider, messages, tool_schemas, model_override, effort_override)
         except (httpx.ConnectTimeout, httpx.ConnectError) as e:
             from . import turnlog
-            turnlog.log("llm_connect_retry", provider=provider, attempt=attempt, error=type(e).__name__, will_retry=wait is not None)
-            if wait is None:
+            will_retry = connect_tries < len(_CONNECT_RETRY_WAITS)
+            turnlog.log("llm_connect_retry", provider=provider, attempt=connect_tries + 1, error=type(e).__name__, will_retry=will_retry)
+            if not will_retry:
                 raise
+            wait = _CONNECT_RETRY_WAITS[connect_tries]
+            connect_tries += 1
+            await asyncio.sleep(wait)
+        except RuntimeError as e:
+            code = _transient_http_status(e)
+            if code is None:
+                raise
+            from . import turnlog
+            will_retry = http_tries < len(_HTTP_RETRY_WAITS)
+            turnlog.log("llm_http_retry", provider=provider, attempt=http_tries + 1, status=code, will_retry=will_retry)
+            if not will_retry:
+                raise RuntimeError(f"{provider}: the model server answered HTTP {code} {http_tries + 1} times in a row. This is usually temporary: wait a minute "
+                                   f"and send your request again.") from e
+            wait = _HTTP_RETRY_WAITS[http_tries]
+            http_tries += 1
             await asyncio.sleep(wait)
