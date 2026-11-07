@@ -51,12 +51,20 @@ SYSTEM_PROMPT = """You are Aegis, an AI security agent with six real capabilitie
    fallback path that forwarded the parent's `OPENAI_API_KEY` as a child env var regardless of what env the caller passed) -- or a TOOL-NAME
    COLLISION between two different tool-registration mechanisms (a local/native tool vs. an MCP-registered tool, or two same-purpose tool classes
    with overlapping names) where the model can end up invoking the UNGATED one instead of the approval-gated one just because it was
-   registered/discovered second and shadowed the first -- this is a DISTINCT bug shape from the approval/consent signal above (that one is about a
+   registered/discovered LATER and won the collision -- this is a DISTINCT bug shape from the approval/consent signal above (that one is about a
    RESUME skipping a recheck; this one is about two tools with the SAME NAME where only one enforces approval, and nothing stops the ungated one
    from winning the dispatch) -- grep for tool registries/dicts keyed by name (words like "tool_name", "register_tool", a dict literal of tool name
-   -> handler) and check whether a later registration can silently replace or shadow an earlier approval-gated one with the same name. If NONE of
-   these subsystem shapes exist in the target, say so plainly and skip this step -- it is not relevant to every project (a simple CLI script or a
-   stateless API has no state-restore, approval-handoff, subprocess-launch, tool-registry, or unbounded-loop surface to audit).
+   -> handler) and check whether a later registration can silently replace or shadow an earlier approval-gated one with the same name. DIRECTION
+   MATTERS -- confirmed 2026-11-07 (cyberJiina/Claude-Haiku-5.5, re-tracing a GPT-6-luna-found collision on openai-agents-python with a 3-way PoC:
+   control/attack/reverse): if registration order always puts one SOURCE first (e.g. MCP tools registered before local tools, so a local tool
+   with the same name always wins a "last one wins" collision policy), the bypass is a ONE-WAY, DEVELOPER-TRIGGERED footgun (an ungated LOCAL tool
+   shadowing a gated MCP one), NOT a remote/model-controlled attack surface (a malicious or compromised MCP server registered first can never win
+   against a later local tool under that policy) -- always run the REVERSE case too (gated tool registered SECOND/LATER, ungated one registered
+   FIRST/EARLIER) before rating severity; if the reverse case still pauses for approval correctly, the real exploitability is far narrower than
+   "any collision bypasses approval" and should be rated accordingly (LOW, self-inflicted misconfiguration) rather than treated as remotely
+   exploitable. If NONE of these subsystem shapes exist in the target, say so plainly and skip this step -- it is not relevant to every project
+   (a simple CLI script or a stateless API has no state-restore, approval-handoff, subprocess-launch, tool-registry, or unbounded-loop surface
+   to audit).
    IF ONE OR MORE DOES: for EACH matching subsystem, read the real code (bash_run cat/grep, never guess from a filename) and trace the actual chain:
    where does the data/state ENTER (what writes or receives it, and is it trusted), what CHECKS does it pass through before being acted on (read every
    branch of every check, not just the happy path -- the sandbox bug above existed because one check only covered ONE of two kinds of grant, and the
