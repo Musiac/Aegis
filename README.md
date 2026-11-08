@@ -24,6 +24,18 @@ Think of **Aegis** as a guard dog that is also a locksmith. It scans your code a
 - **Report:** a Word report and a zip of the fixed project.
 - **Watch it work:** a live terminal pane shows every command it runs.
 - **Safe by design:** the sandbox where fixes are written has no network, and active attacks need your explicit consent. See [Security](#security).
+- **Manual logic/architecture audit:** once the six static scanners report clean on a fix task, Aegis
+  greps the target for known subsystem shapes, traces the real code chain with file:line evidence, and
+  attempts a real proof-of-concept before reporting a confirmed finding. Seven signal shapes today, the
+  newest two ported in from an independent Strix pentest run: sandbox/workspace boundary code;
+  session/state deserialized or restored with stale trust; an approval/consent flow that can be resumed
+  mid-flight, skipping a recheck; request/response metadata written to a log/trace/export without
+  redaction; a configurable safety cap defaulting to unbounded; **subprocess launches that inherit the
+  full parent environment** (or fall back to a parent-env secret even with an explicit scoped env
+  supplied); and **tool-name collisions** between two tool-registration mechanisms where an ungated
+  tool can win dispatch over an approval-gated one with the same name — rated a real finding only if
+  the *reverse* registration order bypasses approval too, otherwise it's a one-way, developer-triggered
+  footgun rather than a remote attack surface.
 
 ## Quick start
 
